@@ -453,9 +453,14 @@
 <section id="deployment-modes">
 <h2>Deployment Modes<a class="headerlink" href="#deployment-modes" title="Link to this heading">#</a></h2>
 <p>OpenShell can run locally or on a remote host. The architecture is identical in both cases — only the Docker container location changes.</p>
-<ul class="simple">
+<ul>
 <li><p><strong>Local</strong>: the k3s cluster runs inside Docker on your workstation. The CLI provisions it automatically on first use.</p></li>
-<li><p><strong>Remote</strong>: the cluster runs on a remote host. Deploy with <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">gateway</span> <span class="pre">start</span> <span class="pre">--remote</span> <span class="pre">user&#64;host</span></code>, then connect with <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">gateway</span> <span class="pre">tunnel</span></code>. All CLI commands route through the SSH tunnel transparently.</p></li>
+<li><p><strong>Remote</strong>: the cluster runs on a remote host. Deploy with <code class="docutils literal notranslate"><span class="pre">nemoclaw</span> <span class="pre">gateway</span> <span class="pre">start</span> <span class="pre">--remote</span> <span class="pre">user&#64;host</span></code>. For example, connect to your DGX Spark</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>nemoclaw<span class="w"> </span>gateway<span class="w"> </span>start<span class="w"> </span>--remote<span class="w"> </span>&lt;username&gt;@&lt;spark-SSID&gt;.local
+<span class="gp">$ </span>nemoclaw<span class="w"> </span>status
+</pre></div>
+</div>
+</li>
 </ul>
 </section>
 <section id="next-steps">
