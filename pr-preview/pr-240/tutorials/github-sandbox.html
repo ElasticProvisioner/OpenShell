@@ -485,20 +485,20 @@ You then diagnose the denial from your machine and from inside the sandbox, appl
 <h2>Prerequisites<a class="headerlink" href="#prerequisites" title="Link to this heading">#</a></h2>
 <p>This tutorial requires the following:</p>
 <ul>
-<li><p>Completed the <a class="reference internal" href="../get-started/quickstart.html"><span class="doc">Quickstart</span></a> tutorial.</p></li>
-<li><p>A GitHub personal access token (PAT) with <code class="docutils literal notranslate"><span class="pre">repo</span></code> scope. To create one, go to the <a class="reference external" href="https://github.com/settings/tokens" rel="noreferer noopener" target="_blank">GitHub personal access token settings page</a>, select <strong>Generate new token (classic)</strong>, check the <code class="docutils literal notranslate"><span class="pre">repo</span></code> scope, and copy the token.</p>
+<li><p>A working OpenShell installation. Complete the <a class="reference internal" href="../get-started/quickstart.html"><span class="doc">Quickstart</span></a> before proceeding.</p></li>
+<li><p>A GitHub personal access token (PAT) with <code class="docutils literal notranslate"><span class="pre">repo</span></code> scope. Generate one from the <a class="reference external" href="https://github.com/settings/tokens" rel="noreferer noopener" target="_blank">GitHub personal access token settings page</a> by selecting <strong>Generate new token (classic)</strong> and enabling the <code class="docutils literal notranslate"><span class="pre">repo</span></code> scope.</p>
 <div class="admonition tip">
 <p class="admonition-title">Tip</p>
-<p>Instead of pasting the token into Claude during the tutorial, use a <a class="reference internal" href="../sandboxes/providers.html"><span class="doc">credential provider</span></a> to inject it into the sandbox automatically at startup:</p>
+<p>To avoid pasting the token manually during the tutorial, you can configure a <a class="reference internal" href="../sandboxes/providers.html"><span class="doc">credential provider</span></a> to inject it automatically at sandbox startup:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>provider<span class="w"> </span>create<span class="w"> </span>--name<span class="w"> </span>my-github<span class="w"> </span>--type<span class="w"> </span>github<span class="w"> </span>--from-existing
 <span class="gp">$ </span>openshell<span class="w"> </span>sandbox<span class="w"> </span>create<span class="w"> </span>--provider<span class="w"> </span>my-github<span class="w"> </span>--keep<span class="w"> </span>--<span class="w"> </span>claude
 </pre></div>
 </div>
-<p>The provider reads <code class="docutils literal notranslate"><span class="pre">GITHUB_TOKEN</span></code> from your host environment and sets it as an environment variable inside the sandbox so Claude can use it directly.</p>
+<p>The provider reads <code class="docutils literal notranslate"><span class="pre">GITHUB_TOKEN</span></code> from your host environment and exposes it as an environment variable inside the sandbox. Claude Code can then use it directly.</p>
 </div>
 </li>
-<li><p>Your own <a class="reference external" href="https://console.anthropic.com/" rel="noreferer noopener" target="_blank">Anthropic account</a> for Claude Code. OpenShell provides the sandbox, not the agent. You need your own account to log in to Claude Code.</p></li>
-<li><p>A public GitHub repository you own (used as the push target). A scratch or test repository works well. The tutorial pushes a small file to it. You can <a class="reference external" href="https://github.com/new" rel="noreferer noopener" target="_blank">create a new repository</a> with a README if you do not have one handy.</p></li>
+<li><p>An <a class="reference external" href="https://console.anthropic.com/" rel="noreferer noopener" target="_blank">Anthropic account</a> with access to Claude Code. OpenShell provides the sandbox runtime, not the agent. You must authenticate with your own account.</p></li>
+<li><p>A GitHub repository you own to use as the push target. A scratch repository is sufficient. You can <a class="reference external" href="https://github.com/new" rel="noreferer noopener" target="_blank">create one</a> with a README if needed.</p></li>
 </ul>
 <p>This tutorial uses two terminals to demonstrate the iterative policy workflow:</p>
 <ul class="simple">
@@ -518,7 +518,7 @@ You then diagnose the denial from your machine and from inside the sandbox, appl
 </section>
 <section id="push-code-to-github">
 <h2>Push Code to GitHub<a class="headerlink" href="#push-code-to-github" title="Link to this heading">#</a></h2>
-<p>In terminal 1, ask Claude Code to write a simple script and push it to your repository:</p>
+<p>In terminal 1, ask Claude Code to write a simple script and push it to your repository. Replace <code class="docutils literal notranslate"><span class="pre">&lt;org&gt;</span></code> with your GitHub organization or username and <code class="docutils literal notranslate"><span class="pre">&lt;repo&gt;</span></code> with your repository name.</p>
 <div class="highlight-text notranslate"><div class="highlight"><pre><span></span>Write a hello_world.py script and push it to https://github.com/&lt;org&gt;/&lt;repo&gt;.
 </pre></div>
 </div>
