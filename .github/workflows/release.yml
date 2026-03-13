@@ -1,0 +1,307 @@
+name: Release
+
+on:
+  schedule:
+    - cron: "0 6 * * *" # 6:00 AM UTC daily
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Compute the next patch version from the latest v* tag
+  # ---------------------------------------------------------------------------
+  compute-version:
+    name: Compute Version
+    runs-on: build-amd64
+    timeout-minutes: 5
+    container:
+      image: ghcr.io/nvidia/openshell/ci:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    env:
+      MISE_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    outputs:
+      next_version: ${{ steps.bump.outputs.next_version }}
+      next_tag: ${{ steps.bump.outputs.next_tag }}
+      should_release: ${{ steps.bump.outputs.should_release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Fetch tags
+        run: git fetch --tags --force
+
+      - name: Compute next patch version
+        id: bump
+        run: |
+          set -euo pipefail
+          RESULT=$(uv run python tasks/scripts/release.py next-version)
+          echo "$RESULT" | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          sr = str(d['should_release']).lower()
+          print(f'should_release={sr}')
+          print(f'next_version={d[\"next_version\"]}')
+          print(f'next_tag={d[\"next_tag\"]}')
+          " >> "$GITHUB_OUTPUT"
+
+          # Log for visibility in the workflow run.
+          echo "$RESULT" | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          if not d['should_release']:
+              reason = d.get('reason', 'No new commits')
+              print(f'::notice::{reason}')
+          else:
+              print(f'::notice::Next release: {d[\"next_tag\"]} (from {d[\"latest_tag\"]})')
+          "
+
+  # ---------------------------------------------------------------------------
+  # Build CLI binaries (Linux musl — static, native on each arch)
+  # ---------------------------------------------------------------------------
+  build-cli-linux:
+    name: Build CLI (Linux ${{ matrix.arch }})
+    needs: [compute-version]
+    if: needs.compute-version.outputs.should_release == 'true'
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: build-amd64
+            target: x86_64-unknown-linux-musl
+          - arch: arm64
+            runner: build-arm64
+            target: aarch64-unknown-linux-musl
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    container:
+      image: ghcr.io/nvidia/openshell/ci:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      options: --privileged
+    env:
+      MISE_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      SCCACHE_MEMCACHED_ENDPOINT: ${{ vars.SCCACHE_MEMCACHED_ENDPOINT }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Fetch tags
+        run: git fetch --tags --force
+
+      - name: Install tools
+        run: mise install
+
+      - name: Cache Rust target and registry
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+        with:
+          shared-key: cli-musl-${{ matrix.arch }}
+          cache-directories: .cache/sccache
+          cache-targets: "true"
+
+      - name: Install musl toolchain
+        run: |
+          set -euo pipefail
+          apt-get update
+          apt-get install -y --no-install-recommends musl-tools
+          rm -rf /var/lib/apt/lists/*
+
+      - name: Add Rust musl target
+        run: mise x -- rustup target add ${{ matrix.target }}
+
+      - name: Scope workspace to CLI crates
+        run: |
+          set -euo pipefail
+          sed -i 's|members = \["crates/\*"\]|members = ["crates/openshell-cli", "crates/openshell-core", "crates/openshell-bootstrap", "crates/openshell-policy", "crates/openshell-providers", "crates/openshell-tui"]|' Cargo.toml
+
+      - name: Patch workspace version
+        run: |
+          set -euo pipefail
+          sed -i -E '/^\[workspace\.package\]/,/^\[/{s/^version[[:space:]]*=[[:space:]]*".*"/version = "${{ needs.compute-version.outputs.next_version }}"/}' Cargo.toml
+
+      - name: Build ${{ matrix.target }}
+        run: mise x -- cargo build --release --target ${{ matrix.target }} -p openshell-cli
+
+      - name: sccache stats
+        if: always()
+        run: mise x -- sccache --show-stats
+
+      - name: Package binary
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          tar -czf artifacts/openshell-${{ matrix.target }}.tar.gz \
+            -C target/${{ matrix.target }}/release openshell
+          ls -lh artifacts/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-cli-linux-${{ matrix.arch }}
+          path: artifacts/*.tar.gz
+          retention-days: 5
+
+  # ---------------------------------------------------------------------------
+  # Build CLI binary (macOS aarch64 via osxcross)
+  # ---------------------------------------------------------------------------
+  build-cli-macos:
+    name: Build CLI (macOS)
+    needs: [compute-version]
+    if: needs.compute-version.outputs.should_release == 'true'
+    runs-on: build-amd64
+    timeout-minutes: 60
+    container:
+      image: ghcr.io/nvidia/openshell/ci:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      options: --privileged
+      volumes:
+        - /var/run/docker.sock:/var/run/docker.sock
+    env:
+      MISE_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      SCCACHE_MEMCACHED_ENDPOINT: ${{ vars.SCCACHE_MEMCACHED_ENDPOINT }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Fetch tags
+        run: git fetch --tags --force
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Set up Docker Buildx
+        uses: ./.github/actions/setup-buildx
+
+      - name: Build macOS binary via Docker
+        run: |
+          set -euo pipefail
+          docker buildx build \
+            --file deploy/docker/Dockerfile.cli-macos \
+            --build-arg OPENSHELL_CARGO_VERSION="${{ needs.compute-version.outputs.next_version }}" \
+            --build-arg CARGO_TARGET_CACHE_SCOPE="${{ github.sha }}" \
+            --target binary \
+            --output type=local,dest=out/ \
+            .
+
+      - name: Package binary
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          tar -czf artifacts/openshell-aarch64-apple-darwin.tar.gz \
+            -C out openshell
+          ls -lh artifacts/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-cli-macos
+          path: artifacts/*.tar.gz
+          retention-days: 5
+
+  # ---------------------------------------------------------------------------
+  # Create git tag and GitHub Release with CLI binaries
+  # ---------------------------------------------------------------------------
+  release:
+    name: Release
+    needs: [compute-version, build-cli-linux, build-cli-macos]
+    if: needs.compute-version.outputs.should_release == 'true'
+    runs-on: build-amd64
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all CLI artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-cli-*
+          path: release/
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          set -euo pipefail
+          cd release
+          sha256sum *.tar.gz > openshell-checksums-sha256.txt
+          cat openshell-checksums-sha256.txt
+
+      - name: Create tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ needs.compute-version.outputs.next_tag }}" -m "Release ${{ needs.compute-version.outputs.next_tag }}" "${GITHUB_SHA}"
+          git push origin "${{ needs.compute-version.outputs.next_tag }}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: OpenShell ${{ needs.compute-version.outputs.next_tag }}
+          tag_name: ${{ needs.compute-version.outputs.next_tag }}
+          target_commitish: ${{ github.sha }}
+          body: |
+            ## OpenShell ${{ needs.compute-version.outputs.next_tag }}
+
+            ### Quick install
+
+            ```bash
+            curl -fsSL https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh | sh
+            ```
+
+            Install a specific version:
+
+            ```bash
+            OPENSHELL_VERSION="${{ needs.compute-version.outputs.next_tag }}" \
+              curl -fsSL https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh | sh
+            ```
+
+            ### Assets
+
+            | File | Platform |
+            |------|----------|
+            | `openshell-x86_64-unknown-linux-musl.tar.gz` | Linux x86_64 |
+            | `openshell-aarch64-unknown-linux-musl.tar.gz` | Linux aarch64 / ARM64 |
+            | `openshell-aarch64-apple-darwin.tar.gz` | macOS Apple Silicon |
+            | `openshell-checksums-sha256.txt` | SHA256 checksums |
+
+            ### Manual install
+
+            ```bash
+            # Linux x86_64
+            curl -fsSL https://github.com/NVIDIA/OpenShell/releases/download/${{ needs.compute-version.outputs.next_tag }}/openshell-x86_64-unknown-linux-musl.tar.gz | tar xz
+            sudo mv openshell /usr/local/bin/
+
+            # Linux aarch64
+            curl -fsSL https://github.com/NVIDIA/OpenShell/releases/download/${{ needs.compute-version.outputs.next_tag }}/openshell-aarch64-unknown-linux-musl.tar.gz | tar xz
+            sudo mv openshell /usr/local/bin/
+
+            # macOS (Apple Silicon)
+            curl -fsSL https://github.com/NVIDIA/OpenShell/releases/download/${{ needs.compute-version.outputs.next_tag }}/openshell-aarch64-apple-darwin.tar.gz | tar xz
+            sudo mv openshell /usr/local/bin/
+            ```
+          files: |
+            release/openshell-x86_64-unknown-linux-musl.tar.gz
+            release/openshell-aarch64-unknown-linux-musl.tar.gz
+            release/openshell-aarch64-apple-darwin.tar.gz
+            release/openshell-checksums-sha256.txt

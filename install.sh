@@ -8,13 +8,13 @@
 #   curl -fsSL https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh | sh
 #
 # Environment variables:
-#   OPENSHELL_VERSION    - Release tag to install (default: "devel")
+#   OPENSHELL_VERSION    - Release tag to install (default: "latest")
 #   OPENSHELL_INSTALL_DIR - Directory to install into (default: /usr/local/bin)
 #
 set -eu
 
 REPO="NVIDIA/OpenShell"
-VERSION="${OPENSHELL_VERSION:-devel}"
+VERSION="${OPENSHELL_VERSION:-latest}"
 INSTALL_DIR="${OPENSHELL_INSTALL_DIR:-/usr/local/bin}"
 
 info() {
@@ -84,7 +84,13 @@ verify_checksum() {
 main() {
   target="$(get_target)"
   filename="openshell-${target}.tar.gz"
-  base_url="https://github.com/${REPO}/releases/download/${VERSION}"
+
+  # "latest" uses GitHub's redirect URL; explicit tags use the direct download path.
+  if [ "$VERSION" = "latest" ]; then
+    base_url="https://github.com/${REPO}/releases/latest/download"
+  else
+    base_url="https://github.com/${REPO}/releases/download/${VERSION}"
+  fi
 
   tmpdir="$(mktemp -d)"
   trap 'rm -rf "$tmpdir"' EXIT

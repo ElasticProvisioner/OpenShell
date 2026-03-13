@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import json
 import os
 import re
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -132,6 +134,78 @@ def get_version(format: str) -> None:
         print(f"GIT_SHA={versions.git_sha}")
 
 
+def _latest_semver_tag() -> str | None:
+    """Find the latest v* semver tag (e.g. v0.5.0), ignoring non-semver tags like 'devel'."""
+    try:
+        output = _git(["tag", "--list", "v[0-9]*.[0-9]*.[0-9]*", "--sort=-v:refname"])
+    except subprocess.CalledProcessError:
+        return None
+    tags = output.strip().splitlines()
+    return tags[0] if tags else None
+
+
+def _parse_semver(tag: str) -> tuple[int, int, int]:
+    """Parse a 'vMAJOR.MINOR.PATCH' tag into (major, minor, patch)."""
+    version = tag.lstrip("v")
+    parts = version.split(".")
+    return int(parts[0]), int(parts[1]), int(parts[2])
+
+
+def next_release_version() -> None:
+    """Compute the next patch release version from the latest v* semver tag.
+
+    Prints JSON with keys: should_release, next_version, next_tag, latest_tag.
+    Exits 0 regardless — callers check should_release.
+    """
+    latest_tag = _latest_semver_tag()
+    if latest_tag is None:
+        print(
+            json.dumps(
+                {
+                    "error": "No v* semver tags found",
+                    "should_release": False,
+                    "next_version": "",
+                    "next_tag": "",
+                    "latest_tag": "",
+                }
+            )
+        )
+        sys.exit(1)
+
+    assert latest_tag is not None  # unreachable; narrowing for type checkers
+    tag_sha = _git(["rev-list", "-n1", latest_tag])
+    head_sha = _git(["rev-parse", "HEAD"])
+
+    if tag_sha == head_sha:
+        print(
+            json.dumps(
+                {
+                    "should_release": False,
+                    "next_version": "",
+                    "next_tag": "",
+                    "latest_tag": latest_tag,
+                    "reason": f"HEAD is already tagged as {latest_tag}",
+                }
+            )
+        )
+        return
+
+    major, minor, patch = _parse_semver(latest_tag)
+    next_version = f"{major}.{minor}.{patch + 1}"
+    next_tag = f"v{next_version}"
+
+    print(
+        json.dumps(
+            {
+                "should_release": True,
+                "next_version": next_version,
+                "next_tag": next_tag,
+                "latest_tag": latest_tag,
+            }
+        )
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="OpenClaw release tooling.")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -145,6 +219,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     get_version_parser.add_argument(
         "--docker", action="store_true", help="Print Docker version only."
+    )
+
+    sub.add_parser(
+        "next-version",
+        help="Compute the next patch release version (JSON output).",
     )
 
     python_publish_parser = sub.add_parser(
@@ -175,6 +254,8 @@ def main() -> None:
             get_version("docker")
         else:
             get_version("all")
+    elif args.command == "next-version":
+        next_release_version()
     elif args.command == "python-publish":
         python_publish(version=args.version, wheel_glob=args.wheel_glob)
 
