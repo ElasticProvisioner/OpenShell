@@ -42,6 +42,6 @@ depends = ["ci"]
 hide = true
 
 ["pre-commit"]
-description = "Alias for ci"
-depends = ["ci"]
+description = "Run CI checks and verify generated docs"
+depends = ["ci", "docs:cli-reference:check"]
 hide = true

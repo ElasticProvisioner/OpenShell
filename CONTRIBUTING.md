@@ -73,15 +73,31 @@ k9s -n navigator
 
 These are the primary `mise` tasks for day-to-day development:
 
-| Task               | Purpose                                                 |
-| ------------------ | ------------------------------------------------------- |
-| `mise run cluster` | Bootstrap or incremental deploy                         |
-| `mise run sandbox` | Create a sandbox on the running cluster                 |
-| `mise run test`    | Default test suite                                      |
-| `mise run e2e`     | Default end-to-end test lane                            |
-| `mise run ci`      | Full local CI checks (lint, compile/type checks, tests) |
-| `mise run docs`    | Build and serve documentation locally                   |
-| `mise run clean`   | Clean build artifacts                                   |
+| Task                              | Purpose                                                 |
+| --------------------------------- | ------------------------------------------------------- |
+| `mise run cluster`                | Bootstrap or incremental deploy                         |
+| `mise run sandbox`                | Create a sandbox on the running cluster                 |
+| `mise run test`                   | Default test suite                                      |
+| `mise run e2e`                    | Default end-to-end test lane                            |
+| `mise run ci`                     | Full local CI checks (lint, compile/type checks, tests) |
+| `mise run docs`                   | Build and serve documentation locally                   |
+| `mise run docs:cli-reference`     | Regenerate CLI reference markdown from source           |
+| `mise run clean`                  | Clean build artifacts                                   |
+
+## Generated Documentation
+
+The CLI reference markdown is auto-generated from the `///` doc comments on commands and flags in `crates/navigator-cli/src/main.rs`. After changing any CLI command, flag, or description, regenerate it:
+
+```bash
+mise run docs:cli-reference
+```
+
+This writes to two locations:
+
+- `.agents/skills/openshell-cli/cli-reference-generated.md` (agent skills)
+- `docs/reference/cli-generated.md` (user-facing docs)
+
+The pre-commit hook (`mise run pre-commit`) automatically checks for staleness and fails if the generated files are out of date.
 
 ## Project Structure
 

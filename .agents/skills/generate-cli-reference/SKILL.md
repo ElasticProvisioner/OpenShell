@@ -16,39 +16,38 @@ Run this after any change to CLI commands, flags, or doc comments in `crates/nav
 - Rust toolchain available (`cargo` on PATH, or use `mise exec --`)
 - The project compiles successfully
 
-## Steps
+## Quick Start
 
-### 1. Build and run the generator
+Regenerate and deploy in one command:
+
+```bash
+mise run docs:cli-reference
+```
+
+This builds the CLI binary, runs the hidden `docs cli-reference` subcommand, and copies the output to both target locations.
+
+### Check only (no changes)
+
+Verify the committed docs are up to date without modifying files:
+
+```bash
+mise run docs:cli-reference:check
+```
+
+This check also runs automatically as part of `mise run pre-commit`.
+
+### Manual steps (without mise)
+
+If you need to run the steps individually:
 
 ```bash
 export PATH="$HOME/.cargo/bin:$PATH"
 cargo run --bin openshell -- docs cli-reference > /tmp/cli-reference-generated.md
-```
-
-Or with mise:
-
-```bash
-mise exec -- cargo run --bin openshell -- docs cli-reference > /tmp/cli-reference-generated.md
-```
-
-### 2. Deploy to documentation targets
-
-Copy the generated file to both locations:
-
-```bash
 cp /tmp/cli-reference-generated.md .agents/skills/openshell-cli/cli-reference-generated.md
 cp /tmp/cli-reference-generated.md docs/reference/cli-generated.md
 ```
 
 Note: `.claude/skills/` is a symlink to `.agents/skills/`, so the first copy covers both.
-
-### 3. Verify
-
-Spot-check that descriptions end with periods and the command tree looks correct:
-
-```bash
-head -60 .agents/skills/openshell-cli/cli-reference-generated.md
-```
 
 ## Target Files
 
@@ -63,6 +62,14 @@ head -60 .agents/skills/openshell-cli/cli-reference-generated.md
 |------|---------|
 | `crates/navigator-cli/src/main.rs` | CLI definitions (commands, flags, doc comments) |
 | `crates/navigator-cli/src/cli_reference.rs` | Markdown generator logic |
+
+## Automation
+
+| Trigger | What happens |
+|---------|-------------|
+| `mise run docs:cli-reference` | Regenerates and deploys to both targets. |
+| `mise run docs:cli-reference:check` | Fails if committed docs are stale. |
+| `mise run pre-commit` | Runs the staleness check alongside CI. |
 
 ## Notes
 

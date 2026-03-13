@@ -33,3 +33,39 @@ run = "uv run sphinx-autobuild docs _build/docs --port 8000 --open-browser"
 ["docs:clean"]
 description = "Remove built documentation"
 run = "rm -rf _build/docs"
+
+["docs:cli-reference"]
+description = "Regenerate CLI reference markdown from source definitions"
+run = """
+set -e
+tmp=$(mktemp)
+cargo run --bin openshell -- docs cli-reference > "$tmp"
+cp "$tmp" .agents/skills/openshell-cli/cli-reference-generated.md
+cp "$tmp" docs/reference/cli-generated.md
+rm "$tmp"
+echo "CLI reference regenerated:"
+echo "  .agents/skills/openshell-cli/cli-reference-generated.md"
+echo "  docs/reference/cli-generated.md"
+"""
+
+["docs:cli-reference:check"]
+description = "Check that CLI reference docs are up to date"
+run = """
+set -e
+tmp=$(mktemp)
+trap 'rm -f "$tmp"' EXIT
+cargo run --bin openshell -- docs cli-reference > "$tmp"
+stale=""
+if ! diff -q "$tmp" .agents/skills/openshell-cli/cli-reference-generated.md >/dev/null 2>&1; then
+  stale="$stale .agents/skills/openshell-cli/cli-reference-generated.md"
+fi
+if ! diff -q "$tmp" docs/reference/cli-generated.md >/dev/null 2>&1; then
+  stale="$stale docs/reference/cli-generated.md"
+fi
+if [ -n "$stale" ]; then
+  echo "ERROR: CLI reference docs are stale:$stale"
+  echo "Run 'mise run docs:cli-reference' to regenerate."
+  exit 1
+fi
+echo "CLI reference docs are up to date."
+"""
