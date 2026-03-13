@@ -477,28 +477,33 @@
 -->
 <section class="tex2jax_ignore mathjax_ignore" id="create-and-manage">
 <h1>Create and Manage<a class="headerlink" href="#create-and-manage" title="Link to this heading">#</a></h1>
-<p>This page covers setting up gateways, creating sandboxes, and managing both. For background on what sandboxes are and how isolation works, refer to <a class="reference internal" href="index.html"><span class="std std-doc">About Sandboxes</span></a>.</p>
+<p>This page covers creating sandboxes and managing them. For background on what sandboxes are and how isolation works, refer to <a class="reference internal" href="index.html"><span class="std std-doc">About Sandboxes</span></a>.</p>
 <div class="admonition warning">
 <p class="admonition-title">Warning</p>
 <p>Docker must be running before you create a gateway or sandbox. If it is not, the CLI
 returns a connection-refused error (<code class="docutils literal notranslate"><span class="pre">os</span> <span class="pre">error</span> <span class="pre">61</span></code>) without explaining
 the cause. Start Docker and try again.</p>
 </div>
-<section id="set-up-a-gateway">
-<h2>Set Up a Gateway<a class="headerlink" href="#set-up-a-gateway" title="Link to this heading">#</a></h2>
-<p>Every sandbox requires a gateway. For local use, you can skip this step. If you run <code class="docutils literal notranslate"><span class="pre">openshell</span> <span class="pre">sandbox</span> <span class="pre">create</span></code> without a gateway, the CLI auto-bootstraps a local gateway for you. If you plan to run sandboxes on a remote host or a cloud-hosted gateway, set up the gateway first. Refer to <a class="reference internal" href="gateways.html"><span class="doc">Gateways</span></a> for deployment options and multi-gateway management.</p>
-</section>
 <section id="create-a-sandbox">
 <h2>Create a Sandbox<a class="headerlink" href="#create-a-sandbox" title="Link to this heading">#</a></h2>
-<p>Run a single command to create a sandbox and launch your agent:</p>
+<p>Create a sandbox with a single command. For example, to create a sandbox with Claude, run:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>sandbox<span class="w"> </span>create<span class="w"> </span>--<span class="w"> </span>claude
 </pre></div>
 </div>
-<p>If no gateway is running, the CLI auto-bootstraps a local gateway before creating the sandbox.</p>
+<p>Every sandbox requires a gateway. If you run <code class="docutils literal notranslate"><span class="pre">openshell</span> <span class="pre">sandbox</span> <span class="pre">create</span></code> without a gateway, the CLI auto-bootstraps a local gateway.</p>
+<section id="remote-gateways">
+<h3>Remote Gateways<a class="headerlink" href="#remote-gateways" title="Link to this heading">#</a></h3>
+<p>If you plan to run sandboxes on a remote host or a cloud-hosted gateway, set up the gateway first. Refer to <a class="reference internal" href="gateways.html"><span class="doc">Gateways</span></a> for deployment options and multi-gateway management.</p>
+</section>
+<section id="gpu-resources">
+<h3>GPU Resources<a class="headerlink" href="#gpu-resources" title="Link to this heading">#</a></h3>
 <p>To request GPU resources, add <code class="docutils literal notranslate"><span class="pre">--gpu</span></code>:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>sandbox<span class="w"> </span>create<span class="w"> </span>--gpu<span class="w"> </span>--<span class="w"> </span>claude
 </pre></div>
 </div>
+</section>
+<section id="custom-containers">
+<h3>Custom Containers<a class="headerlink" href="#custom-containers" title="Link to this heading">#</a></h3>
 <p>Use <code class="docutils literal notranslate"><span class="pre">--from</span></code> to create a sandbox from a pre-built community package, a local directory, or a container image:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>sandbox<span class="w"> </span>create<span class="w"> </span>--from<span class="w"> </span>openclaw
 <span class="gp">$ </span>openshell<span class="w"> </span>sandbox<span class="w"> </span>create<span class="w"> </span>--from<span class="w"> </span>./my-sandbox-dir
@@ -506,7 +511,7 @@ the cause. Start Docker and try again.</p>
 </pre></div>
 </div>
 <p>The CLI resolves community names against the <a class="reference external" href="https://github.com/NVIDIA/OpenShell-Community" rel="noreferer noopener" target="_blank">OpenShell Community</a> catalog, pulls the bundled Dockerfile and policy, builds the image locally, and creates the sandbox. For the full catalog and how to contribute your own, refer to <a class="reference internal" href="community-sandboxes.html"><span class="doc">Community Sandboxes</span></a>.</p>
-<p>A fully specified creation command might look like:</p>
+<p>The following is an example of a fully specified creation command:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>sandbox<span class="w"> </span>create<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>--name<span class="w"> </span>dev<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>--provider<span class="w"> </span>my-claude<span class="w"> </span><span class="se">\</span>
@@ -541,6 +546,7 @@ the cause. Start Docker and try again.</p>
 </tbody>
 </table>
 </div>
+</section>
 </section>
 <section id="connect-to-a-sandbox">
 <h2>Connect to a Sandbox<a class="headerlink" href="#connect-to-a-sandbox" title="Link to this heading">#</a></h2>
@@ -716,8 +722,12 @@ OpenShell-managed SSH include file instead of cluttering your main
   </div>
   <nav class="bd-toc-nav page-toc" aria-labelledby="pst-page-navigation-heading-2">
     <ul class="visible nav section-nav flex-column">
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#set-up-a-gateway">Set Up a Gateway</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#create-a-sandbox">Create a Sandbox</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#create-a-sandbox">Create a Sandbox</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#remote-gateways">Remote Gateways</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#gpu-resources">GPU Resources</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#custom-containers">Custom Containers</a></li>
+</ul>
+</li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#connect-to-a-sandbox">Connect to a Sandbox</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#monitor-and-debug">Monitor and Debug</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#port-forwarding">Port Forwarding</a></li>
