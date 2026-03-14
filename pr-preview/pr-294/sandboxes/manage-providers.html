@@ -9,7 +9,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>Create and Manage &#8212; NVIDIA OpenShell Developer Guide</title>
+    <title>Manage Providers and Credentials &#8212; NVIDIA OpenShell Developer Guide</title>
   
   
   
@@ -52,7 +52,7 @@
     <script src="../_static/copybutton.js?v=6dbb43f8"></script>
     <script src="../_static/search-assets.bundle.js?v=00e3e057"></script>
     <script src="../_static/design-tabs.js?v=f930bc37"></script>
-    <script>DOCUMENTATION_OPTIONS.pagename = 'sandboxes/create-and-manage';</script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'sandboxes/manage-providers';</script>
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.16.1';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = '../versions1.json';
@@ -61,12 +61,12 @@
             false;
         </script>
 
-    <link rel="canonical" href="https://docs.nvidia.com/openshell/latest/sandboxes/create-and-manage.html" />
+    <link rel="canonical" href="https://docs.nvidia.com/openshell/latest/sandboxes/manage-providers.html" />
     <link rel="icon" href="../_static/favicon.png"/>
 
     <link rel="search" title="Search" href="../search.html" />
-    <link rel="next" title="Gateways" href="gateways.html" />
-    <link rel="prev" title="About Gateways and Sandboxes" href="index.html" />
+    <link rel="next" title="Customize Sandbox Policies" href="policies.html" />
+    <link rel="prev" title="Deploy and Manage Gateways" href="manage-gateways.html" />
 
 
 
@@ -400,10 +400,10 @@
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Gateways and Sandboxes</span></p>
 <ul class="current nav bd-sidenav">
 <li class="toctree-l1"><a class="reference internal" href="index.html">About Gateways and Sandboxes</a></li>
-<li class="toctree-l1 current active"><a class="current reference internal" href="#">Create and Manage Sandboxes</a></li>
-<li class="toctree-l1"><a class="reference internal" href="gateways.html">Deploy and Manage Gateways</a></li>
-<li class="toctree-l1"><a class="reference internal" href="providers.html">Providers</a></li>
-<li class="toctree-l1"><a class="reference internal" href="policies.html">Customize Sandbox Policies</a></li>
+<li class="toctree-l1"><a class="reference internal" href="manage-sandboxes.html">Sandboxes</a></li>
+<li class="toctree-l1"><a class="reference internal" href="manage-gateways.html">Gateways</a></li>
+<li class="toctree-l1 current active"><a class="current reference internal" href="#">Providers</a></li>
+<li class="toctree-l1"><a class="reference internal" href="policies.html">Policies</a></li>
 <li class="toctree-l1"><a class="reference internal" href="community-sandboxes.html">Community Sandboxes</a></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Inference Routing</span></p>
@@ -455,7 +455,7 @@
         <i class="fa-solid fa-home"></i>
       </a>
     </li>
-    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">Create and Manage</span></li>
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">Manage Providers and Credentials</span></li>
   </ul>
 </nav>
 </div>
@@ -476,200 +476,145 @@
   SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
   SPDX-License-Identifier: Apache-2.0
 -->
-<section class="tex2jax_ignore mathjax_ignore" id="create-and-manage">
-<h1>Create and Manage<a class="headerlink" href="#create-and-manage" title="Link to this heading">#</a></h1>
-<p>This page covers creating sandboxes and managing them. For background on what sandboxes are and how isolation works, refer to <a class="reference internal" href="index.html"><span class="std std-doc">About Sandboxes</span></a>.</p>
-<div class="admonition important">
-<p class="admonition-title">Important</p>
-<p>Docker must be running before you create a gateway or sandbox. If it is not, the CLI
-returns a connection-refused error (<code class="docutils literal notranslate"><span class="pre">os</span> <span class="pre">error</span> <span class="pre">61</span></code>) without explaining
-the cause. Start Docker and try again.</p>
+<section class="tex2jax_ignore mathjax_ignore" id="manage-providers-and-credentials">
+<h1>Manage Providers and Credentials<a class="headerlink" href="#manage-providers-and-credentials" title="Link to this heading">#</a></h1>
+<p>AI agents typically need credentials to access external services: an API key for the AI model provider, a token for GitHub or GitLab, and so on. OpenShell manages these credentials as first-class entities called <em>providers</em>.</p>
+<p>Create and manage providers that supply credentials to sandboxes.</p>
+<section id="create-a-provider">
+<h2>Create a Provider<a class="headerlink" href="#create-a-provider" title="Link to this heading">#</a></h2>
+<p>Providers can be created from local environment variables or with explicit credential values.</p>
+<section id="from-local-credentials">
+<h3>From Local Credentials<a class="headerlink" href="#from-local-credentials" title="Link to this heading">#</a></h3>
+<p>The fastest way to create a provider is to let the CLI discover credentials from
+your shell environment:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>provider<span class="w"> </span>create<span class="w"> </span>--name<span class="w"> </span>my-claude<span class="w"> </span>--type<span class="w"> </span>claude<span class="w"> </span>--from-existing
+</pre></div>
 </div>
-<section id="create-a-sandbox">
-<h2>Create a Sandbox<a class="headerlink" href="#create-a-sandbox" title="Link to this heading">#</a></h2>
-<p>Create a sandbox with a single command. For example, to create a sandbox with Claude, run:</p>
+<p>This reads <code class="docutils literal notranslate"><span class="pre">ANTHROPIC_API_KEY</span></code> or <code class="docutils literal notranslate"><span class="pre">CLAUDE_API_KEY</span></code> from your current environment
+and stores them in the provider.</p>
+</section>
+<section id="with-explicit-credentials">
+<h3>With Explicit Credentials<a class="headerlink" href="#with-explicit-credentials" title="Link to this heading">#</a></h3>
+<p>Supply a credential value directly:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>provider<span class="w"> </span>create<span class="w"> </span>--name<span class="w"> </span>my-api<span class="w"> </span>--type<span class="w"> </span>generic<span class="w"> </span>--credential<span class="w"> </span><span class="nv">API_KEY</span><span class="o">=</span>sk-abc123
+</pre></div>
+</div>
+</section>
+<section id="bare-key-form">
+<h3>Bare Key Form<a class="headerlink" href="#bare-key-form" title="Link to this heading">#</a></h3>
+<p>Pass a key name without a value to read the value from the environment variable
+of that name:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>provider<span class="w"> </span>create<span class="w"> </span>--name<span class="w"> </span>my-api<span class="w"> </span>--type<span class="w"> </span>generic<span class="w"> </span>--credential<span class="w"> </span>API_KEY
+</pre></div>
+</div>
+<p>This looks up the current value of <code class="docutils literal notranslate"><span class="pre">$API_KEY</span></code> in your shell and stores it.</p>
+</section>
+</section>
+<section id="manage-providers">
+<h2>Manage Providers<a class="headerlink" href="#manage-providers" title="Link to this heading">#</a></h2>
+<p>List, inspect, update, and delete providers from the active cluster.</p>
+<p>List all providers:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>provider<span class="w"> </span>list
+</pre></div>
+</div>
+<p>Inspect a provider:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>provider<span class="w"> </span>get<span class="w"> </span>my-claude
+</pre></div>
+</div>
+<p>Update a provider’s credentials:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>provider<span class="w"> </span>update<span class="w"> </span>my-claude<span class="w"> </span>--type<span class="w"> </span>claude<span class="w"> </span>--from-existing
+</pre></div>
+</div>
+<p>Delete a provider:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>provider<span class="w"> </span>delete<span class="w"> </span>my-claude
+</pre></div>
+</div>
+</section>
+<section id="attach-providers-to-sandboxes">
+<h2>Attach Providers to Sandboxes<a class="headerlink" href="#attach-providers-to-sandboxes" title="Link to this heading">#</a></h2>
+<p>Pass one or more <code class="docutils literal notranslate"><span class="pre">--provider</span></code> flags when creating a sandbox:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>sandbox<span class="w"> </span>create<span class="w"> </span>--provider<span class="w"> </span>my-claude<span class="w"> </span>--provider<span class="w"> </span>my-github<span class="w"> </span>--<span class="w"> </span>claude
+</pre></div>
+</div>
+<p>Each <code class="docutils literal notranslate"><span class="pre">--provider</span></code> flag attaches one provider. The sandbox receives all
+credentials from every attached provider at runtime.</p>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>Providers cannot be added to a running sandbox. If you need to attach an
+additional provider, delete the sandbox and recreate it with all required
+providers specified.</p>
+</div>
+<section id="auto-discovery-shortcut">
+<h3>Auto-Discovery Shortcut<a class="headerlink" href="#auto-discovery-shortcut" title="Link to this heading">#</a></h3>
+<p>When the trailing command in <code class="docutils literal notranslate"><span class="pre">openshell</span> <span class="pre">sandbox</span> <span class="pre">create</span></code> is a recognized tool name (<code class="docutils literal notranslate"><span class="pre">claude</span></code>, <code class="docutils literal notranslate"><span class="pre">codex</span></code>, or <code class="docutils literal notranslate"><span class="pre">opencode</span></code>), the CLI auto-creates the required
+provider from your local credentials if one does not already exist. You do not
+need to create the provider separately:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>sandbox<span class="w"> </span>create<span class="w"> </span>--<span class="w"> </span>claude
 </pre></div>
 </div>
-<p>Every sandbox requires a gateway. If you run <code class="docutils literal notranslate"><span class="pre">openshell</span> <span class="pre">sandbox</span> <span class="pre">create</span></code> without a gateway, the CLI auto-bootstraps a local gateway.</p>
-<section id="remote-gateways">
-<h3>Remote Gateways<a class="headerlink" href="#remote-gateways" title="Link to this heading">#</a></h3>
-<p>If you plan to run sandboxes on a remote host or a cloud-hosted gateway, set up the gateway first. Refer to <a class="reference internal" href="gateways.html"><span class="doc">Gateways</span></a> for deployment options and multi-gateway management.</p>
+<p>This detects <code class="docutils literal notranslate"><span class="pre">claude</span></code> as a known tool, finds your <code class="docutils literal notranslate"><span class="pre">ANTHROPIC_API_KEY</span></code>, creates
+a provider, attaches it to the sandbox, and launches Claude Code.</p>
 </section>
-<section id="gpu-resources">
-<h3>GPU Resources<a class="headerlink" href="#gpu-resources" title="Link to this heading">#</a></h3>
-<p>To request GPU resources, add <code class="docutils literal notranslate"><span class="pre">--gpu</span></code>:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>sandbox<span class="w"> </span>create<span class="w"> </span>--gpu<span class="w"> </span>--<span class="w"> </span>claude
-</pre></div>
-</div>
 </section>
-<section id="custom-containers">
-<h3>Custom Containers<a class="headerlink" href="#custom-containers" title="Link to this heading">#</a></h3>
-<p>Use <code class="docutils literal notranslate"><span class="pre">--from</span></code> to create a sandbox from a pre-built community package, a local directory, or a container image:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>sandbox<span class="w"> </span>create<span class="w"> </span>--from<span class="w"> </span>openclaw
-<span class="gp">$ </span>openshell<span class="w"> </span>sandbox<span class="w"> </span>create<span class="w"> </span>--from<span class="w"> </span>./my-sandbox-dir
-<span class="gp">$ </span>openshell<span class="w"> </span>sandbox<span class="w"> </span>create<span class="w"> </span>--from<span class="w"> </span>my-registry.example.com/my-image:latest
-</pre></div>
-</div>
-<p>The CLI resolves community names against the <a class="reference external" href="https://github.com/NVIDIA/OpenShell-Community" rel="noreferer noopener" target="_blank">OpenShell Community</a> catalog, pulls the bundled Dockerfile and policy, builds the image locally, and creates the sandbox. For the full catalog and how to contribute your own, refer to <a class="reference internal" href="community-sandboxes.html"><span class="doc">Community Sandboxes</span></a>.</p>
-<p>The following is an example of a fully specified creation command:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>sandbox<span class="w"> </span>create<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>--name<span class="w"> </span>dev<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>--provider<span class="w"> </span>my-claude<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>--policy<span class="w"> </span>policy.yaml<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>--upload<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>--<span class="w"> </span>claude
-</pre></div>
-</div>
-<p>Additional <code class="docutils literal notranslate"><span class="pre">sandbox</span> <span class="pre">create</span></code> flags:</p>
+<section id="supported-provider-types">
+<h2>Supported Provider Types<a class="headerlink" href="#supported-provider-types" title="Link to this heading">#</a></h2>
+<p>The following provider types are supported.</p>
 <div class="pst-scrollable-table-container"><table class="table">
 <thead>
-<tr class="row-odd"><th class="head"><p>Flag</p></th>
-<th class="head"><p>Purpose</p></th>
+<tr class="row-odd"><th class="head"><p>Type</p></th>
+<th class="head"><p>Environment Variables Injected</p></th>
+<th class="head"><p>Typical Use</p></th>
 </tr>
 </thead>
 <tbody>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--no-keep</span></code></p></td>
-<td><p>Delete the sandbox automatically after the initial command exits</p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">claude</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">ANTHROPIC_API_KEY</span></code>, <code class="docutils literal notranslate"><span class="pre">CLAUDE_API_KEY</span></code></p></td>
+<td><p>Claude Code, Anthropic API</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--forward</span> <span class="pre">&lt;port&gt;</span></code></p></td>
-<td><p>Forward a local port to the sandbox before running</p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">codex</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">OPENAI_API_KEY</span></code></p></td>
+<td><p>OpenAI Codex</p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--tty</span></code> / <code class="docutils literal notranslate"><span class="pre">--no-tty</span></code></p></td>
-<td><p>Force or disable pseudo-terminal allocation</p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">opencode</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">OPENCODE_API_KEY</span></code>, <code class="docutils literal notranslate"><span class="pre">OPENROUTER_API_KEY</span></code>, <code class="docutils literal notranslate"><span class="pre">OPENAI_API_KEY</span></code></p></td>
+<td><p>opencode tool</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--no-bootstrap</span></code></p></td>
-<td><p>Error if no gateway is available instead of auto-bootstrapping</p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">github</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">GITHUB_TOKEN</span></code>, <code class="docutils literal notranslate"><span class="pre">GH_TOKEN</span></code></p></td>
+<td><p>GitHub API, <code class="docutils literal notranslate"><span class="pre">gh</span></code> CLI — refer to <a class="reference internal" href="../tutorials/github-sandbox.html"><span class="doc">Grant GitHub Push Access to a Sandboxed Agent</span></a></p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--no-auto-providers</span></code></p></td>
-<td><p>Error if required providers are missing instead of prompting</p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">gitlab</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">GITLAB_TOKEN</span></code>, <code class="docutils literal notranslate"><span class="pre">GLAB_TOKEN</span></code>, <code class="docutils literal notranslate"><span class="pre">CI_JOB_TOKEN</span></code></p></td>
+<td><p>GitLab API, <code class="docutils literal notranslate"><span class="pre">glab</span></code> CLI</p></td>
 </tr>
-</tbody>
-</table>
-</div>
-</section>
-</section>
-<section id="connect-to-a-sandbox">
-<h2>Connect to a Sandbox<a class="headerlink" href="#connect-to-a-sandbox" title="Link to this heading">#</a></h2>
-<p>Open an SSH session into a running sandbox:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>sandbox<span class="w"> </span>connect<span class="w"> </span>my-sandbox
-</pre></div>
-</div>
-<p>Launch VS Code or Cursor directly into the sandbox workspace:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>sandbox<span class="w"> </span>create<span class="w"> </span>--editor<span class="w"> </span>vscode<span class="w"> </span>--name<span class="w"> </span>my-sandbox
-<span class="gp">$ </span>openshell<span class="w"> </span>sandbox<span class="w"> </span>connect<span class="w"> </span>my-sandbox<span class="w"> </span>--editor<span class="w"> </span>cursor
-</pre></div>
-</div>
-<p>When <code class="docutils literal notranslate"><span class="pre">--editor</span></code> is used, OpenShell keeps the sandbox alive and installs an
-OpenShell-managed SSH include file instead of cluttering your main
-<code class="docutils literal notranslate"><span class="pre">~/.ssh/config</span></code> with generated host blocks.</p>
-</section>
-<section id="monitor-and-debug">
-<h2>Monitor and Debug<a class="headerlink" href="#monitor-and-debug" title="Link to this heading">#</a></h2>
-<p>List all sandboxes:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>sandbox<span class="w"> </span>list
-</pre></div>
-</div>
-<p>Get detailed information about a specific sandbox:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>sandbox<span class="w"> </span>get<span class="w"> </span>my-sandbox
-</pre></div>
-</div>
-<p>Stream sandbox logs to monitor agent activity and diagnose policy decisions:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>logs<span class="w"> </span>my-sandbox
-</pre></div>
-</div>
-<div class="pst-scrollable-table-container"><table class="table">
-<thead>
-<tr class="row-odd"><th class="head"><p>Flag</p></th>
-<th class="head"><p>Purpose</p></th>
-<th class="head"><p>Example</p></th>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">nvidia</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">NVIDIA_API_KEY</span></code></p></td>
+<td><p>NVIDIA API Catalog</p></td>
 </tr>
-</thead>
-<tbody>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--tail</span></code></p></td>
-<td><p>Stream logs in real time</p></td>
-<td><p><code class="docutils literal notranslate"><span class="pre">openshell</span> <span class="pre">logs</span> <span class="pre">my-sandbox</span> <span class="pre">--tail</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">generic</span></code></p></td>
+<td><p>User-defined</p></td>
+<td><p>Any service with custom credentials</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--source</span></code></p></td>
-<td><p>Filter by log source</p></td>
-<td><p><code class="docutils literal notranslate"><span class="pre">--source</span> <span class="pre">sandbox</span></code></p></td>
-</tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--level</span></code></p></td>
-<td><p>Filter by severity</p></td>
-<td><p><code class="docutils literal notranslate"><span class="pre">--level</span> <span class="pre">warn</span></code></p></td>
-</tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--since</span></code></p></td>
-<td><p>Show logs from a time window</p></td>
-<td><p><code class="docutils literal notranslate"><span class="pre">--since</span> <span class="pre">5m</span></code></p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">outlook</span></code></p></td>
+<td><p><em>(none: no auto-discovery)</em></p></td>
+<td><p>Microsoft Outlook integration</p></td>
 </tr>
 </tbody>
 </table>
-</div>
-<p>OpenShell Terminal combines sandbox status and live logs in a single real-time dashboard:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>term
-</pre></div>
-</div>
-<p>Use the terminal to spot blocked connections marked <code class="docutils literal notranslate"><span class="pre">action=deny</span></code> and inference interceptions marked <code class="docutils literal notranslate"><span class="pre">action=inspect_for_inference</span></code>. If a connection is blocked unexpectedly, add the host to your network policy. Refer to <a class="reference internal" href="policies.html"><span class="doc">Customize Sandbox Policies</span></a> for the workflow.</p>
-</section>
-<section id="port-forwarding">
-<h2>Port Forwarding<a class="headerlink" href="#port-forwarding" title="Link to this heading">#</a></h2>
-<p>Forward a local port to a running sandbox to access services inside it, such as a web server or database:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>forward<span class="w"> </span>start<span class="w"> </span><span class="m">8000</span><span class="w"> </span>my-sandbox
-<span class="gp">$ </span>openshell<span class="w"> </span>forward<span class="w"> </span>start<span class="w"> </span><span class="m">8000</span><span class="w"> </span>my-sandbox<span class="w"> </span>-d<span class="w">    </span><span class="c1"># run in background</span>
-</pre></div>
-</div>
-<p>List and stop active forwards:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>forward<span class="w"> </span>list
-<span class="gp">$ </span>openshell<span class="w"> </span>forward<span class="w"> </span>stop<span class="w"> </span><span class="m">8000</span><span class="w"> </span>my-sandbox
-</pre></div>
 </div>
 <div class="admonition tip">
 <p class="admonition-title">Tip</p>
-<p>You can also forward a port at creation time with <code class="docutils literal notranslate"><span class="pre">--forward</span></code>:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>sandbox<span class="w"> </span>create<span class="w"> </span>--forward<span class="w"> </span><span class="m">8000</span><span class="w"> </span>--<span class="w"> </span>claude
-</pre></div>
-</div>
-</div>
-</section>
-<section id="ssh-config">
-<h2>SSH Config<a class="headerlink" href="#ssh-config" title="Link to this heading">#</a></h2>
-<p>Generate an SSH config entry for a sandbox so tools like VS Code Remote-SSH can connect directly:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>sandbox<span class="w"> </span>ssh-config<span class="w"> </span>my-sandbox
-</pre></div>
-</div>
-<p>Append the output to <code class="docutils literal notranslate"><span class="pre">~/.ssh/config</span></code> or use <code class="docutils literal notranslate"><span class="pre">--editor</span></code> on <code class="docutils literal notranslate"><span class="pre">sandbox</span> <span class="pre">create</span></code>/<code class="docutils literal notranslate"><span class="pre">sandbox</span> <span class="pre">connect</span></code> for automatic setup.</p>
-</section>
-<section id="transfer-files">
-<h2>Transfer Files<a class="headerlink" href="#transfer-files" title="Link to this heading">#</a></h2>
-<p>Upload files from your host into the sandbox:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>sandbox<span class="w"> </span>upload<span class="w"> </span>my-sandbox<span class="w"> </span>./src<span class="w"> </span>/sandbox/src
-</pre></div>
-</div>
-<p>Download files from the sandbox to your host:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>sandbox<span class="w"> </span>download<span class="w"> </span>my-sandbox<span class="w"> </span>/sandbox/output<span class="w"> </span>./local
-</pre></div>
-</div>
-<div class="admonition note">
-<p class="admonition-title">Note</p>
-<p>You can also upload files at creation time with the <code class="docutils literal notranslate"><span class="pre">--upload</span></code> flag on
-<code class="docutils literal notranslate"><span class="pre">openshell</span> <span class="pre">sandbox</span> <span class="pre">create</span></code>.</p>
-</div>
-</section>
-<section id="delete-sandboxes">
-<h2>Delete Sandboxes<a class="headerlink" href="#delete-sandboxes" title="Link to this heading">#</a></h2>
-<p>Deleting a sandbox stops all processes, releases resources, and purges injected credentials.</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>openshell<span class="w"> </span>sandbox<span class="w"> </span>delete<span class="w"> </span>my-sandbox
-<span class="gp">$ </span>openshell<span class="w"> </span>sandbox<span class="w"> </span>delete<span class="w"> </span>--all
-</pre></div>
+<p>Use the <code class="docutils literal notranslate"><span class="pre">generic</span></code> type for any service not listed above. You define the
+environment variable names and values yourself with <code class="docutils literal notranslate"><span class="pre">--credential</span></code>.</p>
 </div>
 </section>
 <section id="next-steps">
 <h2>Next Steps<a class="headerlink" href="#next-steps" title="Link to this heading">#</a></h2>
+<p>Explore related topics:</p>
 <ul class="simple">
-<li><p>To follow a complete end-to-end example, refer to the <a class="reference internal" href="../tutorials/github-sandbox.html"><span class="doc">Grant GitHub Push Access to a Sandboxed Agent</span></a> tutorial.</p></li>
-<li><p>To supply API keys or tokens, refer to <a class="reference internal" href="providers.html"><span class="doc">Providers</span></a>.</p></li>
 <li><p>To control what the agent can access, refer to <a class="reference internal" href="policies.html"><span class="doc">Customize Sandbox Policies</span></a>.</p></li>
 <li><p>To use a pre-built environment, refer to the <a class="reference internal" href="community-sandboxes.html"><span class="doc">Community Sandboxes</span></a> catalog.</p></li>
+<li><p>To view the complete field reference for the policy YAML, refer to the <a class="reference internal" href="../reference/policy-schema.html"><span class="std std-doc">Policy Schema Reference</span></a>.</p></li>
 </ul>
 </section>
 </section>
@@ -685,20 +630,20 @@ OpenShell-managed SSH include file instead of cluttering your main
                   
 <div class="prev-next-area">
     <a class="left-prev"
-       href="index.html"
+       href="manage-gateways.html"
        title="previous page">
       <i class="fa-solid fa-angle-left"></i>
       <div class="prev-next-info">
         <p class="prev-next-subtitle">previous</p>
-        <p class="prev-next-title">About Gateways and Sandboxes</p>
+        <p class="prev-next-title">Deploy and Manage Gateways</p>
       </div>
     </a>
     <a class="right-next"
-       href="gateways.html"
+       href="policies.html"
        title="next page">
       <div class="prev-next-info">
         <p class="prev-next-subtitle">next</p>
-        <p class="prev-next-title">Gateways</p>
+        <p class="prev-next-title">Customize Sandbox Policies</p>
       </div>
       <i class="fa-solid fa-angle-right"></i>
     </a>
@@ -723,18 +668,18 @@ OpenShell-managed SSH include file instead of cluttering your main
   </div>
   <nav class="bd-toc-nav page-toc" aria-labelledby="pst-page-navigation-heading-2">
     <ul class="visible nav section-nav flex-column">
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#create-a-sandbox">Create a Sandbox</a><ul class="nav section-nav flex-column">
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#remote-gateways">Remote Gateways</a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#gpu-resources">GPU Resources</a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#custom-containers">Custom Containers</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#create-a-provider">Create a Provider</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#from-local-credentials">From Local Credentials</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#with-explicit-credentials">With Explicit Credentials</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#bare-key-form">Bare Key Form</a></li>
 </ul>
 </li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#connect-to-a-sandbox">Connect to a Sandbox</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#monitor-and-debug">Monitor and Debug</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#port-forwarding">Port Forwarding</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#ssh-config">SSH Config</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#transfer-files">Transfer Files</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#delete-sandboxes">Delete Sandboxes</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#manage-providers">Manage Providers</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#attach-providers-to-sandboxes">Attach Providers to Sandboxes</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#auto-discovery-shortcut">Auto-Discovery Shortcut</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#supported-provider-types">Supported Provider Types</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#next-steps">Next Steps</a></li>
 </ul>
   </nav></div>
