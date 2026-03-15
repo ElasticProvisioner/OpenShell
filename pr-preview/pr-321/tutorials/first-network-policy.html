@@ -431,6 +431,7 @@
 <h2>Prerequisites<a class="headerlink" href="#prerequisites" title="Link to this heading">#</a></h2>
 <ul class="simple">
 <li><p>A working OpenShell installation. Complete the <a class="reference internal" href="../get-started/quickstart.html"><span class="doc">Quickstart</span></a> before proceeding.</p></li>
+<li><p>Docker Desktop running on your machine.</p></li>
 </ul>
 <div class="admonition tip">
 <p class="admonition-title">Tip</p>
@@ -548,11 +549,7 @@
 <span class="w">    </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;title&quot;:&quot;oops&quot;}&#39;</span>
 </pre></div>
 </div>
-<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
-<span class="w">  </span><span class="nt">&quot;error&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;policy_denied&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;policy&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;github-api-readonly&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;detail&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;POST /repos/octocat/hello-world/issues not permitted by policy&quot;</span>
-<span class="p">}</span>
+<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span><span class="nt">&quot;error&quot;</span><span class="p">:</span><span class="s2">&quot;policy_denied&quot;</span><span class="p">,</span><span class="nt">&quot;policy&quot;</span><span class="p">:</span><span class="s2">&quot;github-api-readonly&quot;</span><span class="p">,</span><span class="nt">&quot;detail&quot;</span><span class="p">:</span><span class="s2">&quot;POST /repos/octocat/hello-world/issues not permitted by policy&quot;</span><span class="p">}</span>
 </pre></div>
 </div>
 <p>The CONNECT request succeeded because <code class="docutils literal notranslate"><span class="pre">api.github.com</span></code> is allowed, but the L7 proxy inspected the HTTP method and returned <code class="docutils literal notranslate"><span class="pre">403</span></code>. <code class="docutils literal notranslate"><span class="pre">POST</span></code> is not in the <code class="docutils literal notranslate"><span class="pre">read-only</span></code> preset. An agent with this policy can read code from GitHub but cannot create issues, push commits, or modify anything.</p>
