@@ -83,13 +83,20 @@ jobs:
           fi
 
       - name: Install CLI from GitHub Release
-        run: ./install.sh
+        run: |
+          set -euo pipefail
+          ./install.sh
+          echo "$OPENSHELL_INSTALL_DIR" >> "$GITHUB_PATH"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENSHELL_VERSION: ${{ steps.release.outputs.tag }}
+          OPENSHELL_INSTALL_DIR: ${{ runner.temp }}/openshell-bin
 
       - name: Verify CLI installation
-        run: openshell --version
+        run: |
+          set -euo pipefail
+          command -v openshell
+          openshell --version
 
       - name: Resolve gateway host
         run: |
