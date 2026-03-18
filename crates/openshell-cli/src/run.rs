@@ -30,7 +30,7 @@ use openshell_core::proto::{
     ListProvidersRequest, ListSandboxPoliciesRequest, ListSandboxesRequest, PolicyStatus, Provider,
     RejectDraftChunkRequest, Sandbox, SandboxPhase, SandboxPolicy, SandboxSpec, SandboxTemplate,
     SetClusterInferenceRequest, SettingScope, SettingValue, UpdateProviderRequest,
-    UpdateSandboxPolicyRequest, WatchSandboxRequest, setting_value,
+    UpdateSettingsRequest, WatchSandboxRequest, setting_value,
 };
 use openshell_core::settings::{self, SettingValueKind};
 use openshell_providers::{
@@ -3872,7 +3872,7 @@ pub async fn sandbox_policy_set_global(
 
     let mut client = grpc_client(server, tls).await?;
     let response = client
-        .update_sandbox_policy(UpdateSandboxPolicyRequest {
+        .update_settings(UpdateSettingsRequest {
             name: String::new(),
             policy: Some(policy),
             setting_key: String::new(),
@@ -4077,7 +4077,7 @@ pub async fn gateway_setting_set(
 
     let mut client = grpc_client(server, tls).await?;
     let response = client
-        .update_sandbox_policy(UpdateSandboxPolicyRequest {
+        .update_settings(UpdateSettingsRequest {
             name: String::new(),
             policy: None,
             setting_key: key.to_string(),
@@ -4110,7 +4110,7 @@ pub async fn sandbox_setting_set(
 
     let mut client = grpc_client(server, tls).await?;
     let response = client
-        .update_sandbox_policy(UpdateSandboxPolicyRequest {
+        .update_settings(UpdateSettingsRequest {
             name: name.to_string(),
             policy: None,
             setting_key: key.to_string(),
@@ -4143,7 +4143,7 @@ pub async fn gateway_setting_delete(
 
     let mut client = grpc_client(server, tls).await?;
     let response = client
-        .update_sandbox_policy(UpdateSandboxPolicyRequest {
+        .update_settings(UpdateSettingsRequest {
             name: String::new(),
             policy: None,
             setting_key: key.to_string(),
@@ -4176,7 +4176,7 @@ pub async fn sandbox_setting_delete(
 ) -> Result<()> {
     let mut client = grpc_client(server, tls).await?;
     let response = client
-        .update_sandbox_policy(UpdateSandboxPolicyRequest {
+        .update_settings(UpdateSettingsRequest {
             name: name.to_string(),
             policy: None,
             setting_key: key.to_string(),
@@ -4232,7 +4232,7 @@ pub async fn sandbox_policy_set(
         .map_or(0, |r| r.version);
 
     let response = client
-        .update_sandbox_policy(UpdateSandboxPolicyRequest {
+        .update_settings(UpdateSettingsRequest {
             name: name.to_string(),
             policy: Some(policy),
             setting_key: String::new(),
