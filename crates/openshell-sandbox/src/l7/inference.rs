@@ -96,6 +96,8 @@ pub enum ParseResult {
     Complete(ParsedHttpRequest, usize),
     /// Headers are incomplete — caller should read more data.
     Incomplete,
+    /// The request is malformed and must be rejected (e.g., duplicate Content-Length).
+    Invalid(String),
 }
 
 /// Try to parse an HTTP/1.1 request from raw bytes.
@@ -125,6 +127,7 @@ pub fn try_parse_http_request(buf: &[u8]) -> ParseResult {
 
     let mut headers = Vec::new();
     let mut content_length: usize = 0;
+    let mut has_content_length = false;
     let mut is_chunked = false;
     for line in lines {
         if line.is_empty() {
@@ -134,7 +137,21 @@ pub fn try_parse_http_request(buf: &[u8]) -> ParseResult {
             let name = name.trim().to_string();
             let value = value.trim().to_string();
             if name.eq_ignore_ascii_case("content-length") {
-                content_length = value.parse().unwrap_or(0);
+                let new_len: usize = match value.parse() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        return ParseResult::Invalid(format!(
+                            "invalid Content-Length value: {value}"
+                        ));
+                    }
+                };
+                if has_content_length && new_len != content_length {
+                    return ParseResult::Invalid(format!(
+                        "duplicate Content-Length headers with differing values ({content_length} vs {new_len})"
+                    ));
+                }
+                content_length = new_len;
+                has_content_length = true;
             }
             if name.eq_ignore_ascii_case("transfer-encoding")
                 && value
@@ -551,5 +568,44 @@ mod tests {
             panic!("expected Complete for 100 chunks");
         };
         assert_eq!(parsed.body.len(), 100);
+    }
+
+    // ---- SEC: Content-Length validation ----
+
+    #[test]
+    fn reject_differing_duplicate_content_length() {
+        let request = b"POST /v1/chat/completions HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\nContent-Length: 50\r\n\r\n";
+        assert!(matches!(
+            try_parse_http_request(request),
+            ParseResult::Invalid(reason) if reason.contains("differing values")
+        ));
+    }
+
+    #[test]
+    fn accept_identical_duplicate_content_length() {
+        let request = b"POST /v1/chat/completions HTTP/1.1\r\nHost: x\r\nContent-Length: 5\r\nContent-Length: 5\r\n\r\nhello";
+        let ParseResult::Complete(parsed, _) = try_parse_http_request(request) else {
+            panic!("expected Complete for identical duplicate CL");
+        };
+        assert_eq!(parsed.body, b"hello");
+    }
+
+    #[test]
+    fn reject_non_numeric_content_length() {
+        let request =
+            b"POST /v1/chat/completions HTTP/1.1\r\nHost: x\r\nContent-Length: abc\r\n\r\n";
+        assert!(matches!(
+            try_parse_http_request(request),
+            ParseResult::Invalid(reason) if reason.contains("invalid Content-Length")
+        ));
+    }
+
+    #[test]
+    fn reject_two_non_numeric_content_lengths() {
+        let request = b"POST /v1/chat/completions HTTP/1.1\r\nHost: x\r\nContent-Length: abc\r\nContent-Length: def\r\n\r\n";
+        assert!(matches!(
+            try_parse_http_request(request),
+            ParseResult::Invalid(_)
+        ));
     }
 }
