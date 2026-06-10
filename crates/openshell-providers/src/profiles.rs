@@ -14,6 +14,7 @@ use openshell_core::proto::{
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use std::collections::{HashMap, HashSet};
+use std::net::IpAddr;
 use std::sync::OnceLock;
 
 const PATH_TEMPLATE_CREDENTIAL_PLACEHOLDER: &str = "{credential}";
@@ -90,6 +91,38 @@ pub struct CredentialProfile {
     pub refresh: Option<CredentialRefreshProfile>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub path_template: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_grant: Option<TokenGrantProfile>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct TokenGrantProfile {
+    pub token_endpoint: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub audience: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub jwt_svid_audience: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub client_assertion_type: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scopes: Vec<String>,
+    #[serde(default, skip_serializing_if = "is_zero_i64")]
+    pub cache_ttl_seconds: i64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub audience_overrides: Vec<TokenGrantAudienceOverrideProfile>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct TokenGrantAudienceOverrideProfile {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub host: String,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub port: u32,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub path: String,
+    pub audience: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scopes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -290,6 +323,7 @@ impl ProviderTypeProfile {
                         .as_ref()
                         .map(credential_refresh_from_proto),
                     path_template: credential.path_template.clone(),
+                    token_grant: credential.token_grant.as_ref().map(token_grant_from_proto),
                 })
                 .collect(),
             endpoints: profile.endpoints.iter().map(endpoint_from_proto).collect(),
@@ -316,23 +350,23 @@ impl ProviderTypeProfile {
         vars
     }
 
-    /// Whether this profile can be created without an initial access token because
-    /// the gateway can mint at least one credential immediately from refresh
-    /// material, and no required credential falls outside that gateway-mintable set.
+    /// Whether this profile can be created without initial static credentials.
+    ///
+    /// Empty provider creation is allowed when at least one credential can be
+    /// resolved at runtime, and every required credential can be resolved at
+    /// runtime. Runtime-resolvable credentials are either gateway-mintable
+    /// refresh credentials or sandbox-side dynamic token grants.
     #[must_use]
-    pub fn allows_gateway_refresh_bootstrap(&self) -> bool {
-        let mut has_gateway_mintable_credential = false;
+    pub fn allows_empty_provider_credentials(&self) -> bool {
+        let mut has_runtime_resolvable_credential = false;
         for credential in &self.credentials {
-            let is_gateway_mintable = credential
-                .refresh
-                .as_ref()
-                .is_some_and(CredentialRefreshProfile::is_gateway_mintable);
-            if credential.required && !is_gateway_mintable {
+            let is_runtime_resolvable = credential.is_runtime_resolvable();
+            if credential.required && !is_runtime_resolvable {
                 return false;
             }
-            has_gateway_mintable_credential |= is_gateway_mintable;
+            has_runtime_resolvable_credential |= is_runtime_resolvable;
         }
-        has_gateway_mintable_credential
+        has_runtime_resolvable_credential
     }
 
     #[must_use]
@@ -355,6 +389,7 @@ impl ProviderTypeProfile {
                     query_param: credential.query_param.clone(),
                     refresh: credential.refresh.as_ref().map(credential_refresh_to_proto),
                     path_template: credential.path_template.clone(),
+                    token_grant: credential.token_grant.as_ref().map(token_grant_to_proto),
                 })
                 .collect(),
             endpoints: self.endpoints.iter().map(endpoint_to_proto).collect(),
@@ -372,6 +407,17 @@ impl ProviderTypeProfile {
             endpoints: self.endpoints.iter().map(endpoint_to_proto).collect(),
             binaries: self.binaries.iter().map(binary_to_proto).collect(),
         }
+    }
+}
+
+impl CredentialProfile {
+    #[must_use]
+    pub fn is_runtime_resolvable(&self) -> bool {
+        self.token_grant.is_some()
+            || self
+                .refresh
+                .as_ref()
+                .is_some_and(CredentialRefreshProfile::is_gateway_mintable)
     }
 }
 
@@ -599,6 +645,66 @@ fn credential_refresh_to_proto(refresh: &CredentialRefreshProfile) -> ProviderCr
                 secret: material.secret,
             })
             .collect(),
+    }
+}
+
+fn token_grant_from_proto(
+    token_grant: &openshell_core::proto::ProviderCredentialTokenGrant,
+) -> TokenGrantProfile {
+    TokenGrantProfile {
+        token_endpoint: token_grant.token_endpoint.clone(),
+        audience: token_grant.audience.clone(),
+        jwt_svid_audience: token_grant.jwt_svid_audience.clone(),
+        client_assertion_type: token_grant.client_assertion_type.clone(),
+        scopes: token_grant.scopes.clone(),
+        cache_ttl_seconds: token_grant.cache_ttl_seconds,
+        audience_overrides: token_grant
+            .audience_overrides
+            .iter()
+            .map(token_grant_audience_override_from_proto)
+            .collect(),
+    }
+}
+
+fn token_grant_to_proto(
+    token_grant: &TokenGrantProfile,
+) -> openshell_core::proto::ProviderCredentialTokenGrant {
+    openshell_core::proto::ProviderCredentialTokenGrant {
+        token_endpoint: token_grant.token_endpoint.clone(),
+        audience: token_grant.audience.clone(),
+        jwt_svid_audience: token_grant.jwt_svid_audience.clone(),
+        client_assertion_type: token_grant.client_assertion_type.clone(),
+        scopes: token_grant.scopes.clone(),
+        cache_ttl_seconds: token_grant.cache_ttl_seconds,
+        audience_overrides: token_grant
+            .audience_overrides
+            .iter()
+            .map(token_grant_audience_override_to_proto)
+            .collect(),
+    }
+}
+
+fn token_grant_audience_override_from_proto(
+    override_config: &openshell_core::proto::ProviderCredentialTokenGrantAudienceOverride,
+) -> TokenGrantAudienceOverrideProfile {
+    TokenGrantAudienceOverrideProfile {
+        host: override_config.host.clone(),
+        port: override_config.port,
+        path: override_config.path.clone(),
+        audience: override_config.audience.clone(),
+        scopes: override_config.scopes.clone(),
+    }
+}
+
+fn token_grant_audience_override_to_proto(
+    override_config: &TokenGrantAudienceOverrideProfile,
+) -> openshell_core::proto::ProviderCredentialTokenGrantAudienceOverride {
+    openshell_core::proto::ProviderCredentialTokenGrantAudienceOverride {
+        host: override_config.host.clone(),
+        port: override_config.port,
+        path: override_config.path.clone(),
+        audience: override_config.audience.clone(),
+        scopes: override_config.scopes.clone(),
     }
 }
 
@@ -1097,6 +1203,43 @@ pub fn validate_profile_set(
                     }
                 }
             }
+
+            if let Some(token_grant) = credential.token_grant.as_ref()
+                && let Err(message) = validate_token_grant_endpoint(&token_grant.token_endpoint)
+            {
+                diagnostics.push(ProfileValidationDiagnostic::error(
+                    source,
+                    profile_id,
+                    "credentials.token_grant.token_endpoint",
+                    message,
+                ));
+            }
+            diagnostics.extend(validate_token_grant_audience_overrides(
+                source,
+                profile_id,
+                credential,
+                &profile.endpoints,
+            ));
+            if credential.token_grant.is_some()
+                && let Err(message) = validate_token_grant_auth_style(credential)
+            {
+                diagnostics.push(ProfileValidationDiagnostic::error(
+                    source,
+                    profile_id,
+                    "credentials.token_grant.auth_style",
+                    message,
+                ));
+            }
+            if credential.token_grant.is_some()
+                && let Err(message) = validate_token_grant_header_name(credential)
+            {
+                diagnostics.push(ProfileValidationDiagnostic::error(
+                    source,
+                    profile_id,
+                    "credentials.header_name",
+                    message,
+                ));
+            }
         }
 
         for (index, endpoint) in profile.endpoints.iter().enumerate() {
@@ -1135,6 +1278,337 @@ fn endpoint_is_valid(endpoint: &EndpointProfile) -> bool {
             .all(|port| (1..=65_535).contains(port));
     }
     (1..=65_535).contains(&endpoint.port)
+}
+
+#[derive(Debug, Clone)]
+struct TokenGrantOverrideBinding {
+    override_index: usize,
+    host: String,
+    port: u32,
+    path: String,
+    score: u32,
+}
+
+fn validate_token_grant_audience_overrides(
+    source: &str,
+    profile_id: &str,
+    credential: &CredentialProfile,
+    endpoints: &[EndpointProfile],
+) -> Vec<ProfileValidationDiagnostic> {
+    let Some(token_grant) = credential.token_grant.as_ref() else {
+        return Vec::new();
+    };
+
+    let mut diagnostics = Vec::new();
+    let mut bindings: Vec<TokenGrantOverrideBinding> = Vec::new();
+    for (override_index, override_config) in token_grant.audience_overrides.iter().enumerate() {
+        for endpoint in endpoints {
+            for port in endpoint_ports(endpoint.port, &endpoint.ports) {
+                if !token_grant_override_matches_endpoint(override_config, &endpoint.host, port) {
+                    continue;
+                }
+
+                let host = if override_config.host.trim().is_empty() {
+                    endpoint.host.trim()
+                } else {
+                    override_config.host.trim()
+                };
+                let path = if override_config.path.trim().is_empty() {
+                    endpoint.path.trim()
+                } else {
+                    override_config.path.trim()
+                };
+                let candidate = TokenGrantOverrideBinding {
+                    override_index,
+                    host: host.to_ascii_lowercase(),
+                    port,
+                    path: path.to_string(),
+                    score: dynamic_token_grant_match_score(host, path),
+                };
+                for existing in &bindings {
+                    if existing.override_index == candidate.override_index {
+                        continue;
+                    }
+                    if existing.port == candidate.port
+                        && existing.score == candidate.score
+                        && host_patterns_can_overlap(&existing.host, &candidate.host)
+                        && path_patterns_can_overlap(&existing.path, &candidate.path)
+                    {
+                        diagnostics.push(ProfileValidationDiagnostic::error(
+                            source,
+                            profile_id,
+                            "credentials.token_grant.audience_overrides",
+                            format!(
+                                "credential '{}' has ambiguous token_grant audience_overrides at indexes {} and {} for {}:{} path selectors '{}' and '{}'",
+                                credential.name,
+                                existing.override_index,
+                                candidate.override_index,
+                                candidate.host,
+                                candidate.port,
+                                existing.path,
+                                candidate.path
+                            ),
+                        ));
+                    }
+                }
+                bindings.push(candidate);
+            }
+        }
+    }
+    diagnostics
+}
+
+fn endpoint_ports(port: u32, ports: &[u32]) -> Vec<u32> {
+    if ports.is_empty() {
+        if port == 0 { Vec::new() } else { vec![port] }
+    } else {
+        ports.iter().copied().filter(|port| *port != 0).collect()
+    }
+}
+
+fn token_grant_override_matches_endpoint(
+    override_config: &TokenGrantAudienceOverrideProfile,
+    endpoint_host: &str,
+    endpoint_port: u32,
+) -> bool {
+    let override_host = override_config.host.trim();
+    let host_matches = override_host.is_empty()
+        || host_pattern_matches(override_host, endpoint_host)
+        || host_pattern_matches(endpoint_host, override_host);
+    let port_matches = override_config.port == 0 || override_config.port == endpoint_port;
+    host_matches && port_matches
+}
+
+fn host_pattern_matches(pattern: &str, host: &str) -> bool {
+    let pattern = pattern.to_ascii_lowercase();
+    let host = host.to_ascii_lowercase();
+    if pattern == host {
+        return true;
+    }
+    if !pattern.contains('*') {
+        return false;
+    }
+
+    let pattern_labels: Vec<&str> = pattern.split('.').collect();
+    let host_labels: Vec<&str> = host.split('.').collect();
+    host_pattern_labels_match(&pattern_labels, &host_labels)
+}
+
+fn host_pattern_labels_match(pattern: &[&str], host: &[&str]) -> bool {
+    match pattern.split_first() {
+        None => host.is_empty(),
+        Some((label, rest)) if *label == "**" => {
+            host_pattern_labels_match(rest, host)
+                || (!host.is_empty() && host_pattern_labels_match(pattern, &host[1..]))
+        }
+        Some((label, rest)) if *label == "*" => {
+            !host.is_empty() && host_pattern_labels_match(rest, &host[1..])
+        }
+        Some((literal, rest)) => {
+            host.first().is_some_and(|label| label == literal)
+                && host_pattern_labels_match(rest, &host[1..])
+        }
+    }
+}
+
+fn dynamic_token_grant_match_score(host: &str, path: &str) -> u32 {
+    host_pattern_specificity(host) + endpoint_path_specificity(path)
+}
+
+fn host_pattern_specificity(pattern: &str) -> u32 {
+    let wildcard_penalty = count_as_u32(pattern.matches('*').count());
+    let label_count = count_as_u32(pattern.split('.').filter(|label| !label.is_empty()).count());
+    let literal_chars = count_as_u32(pattern.chars().filter(|ch| *ch != '*').count());
+    100_000u32
+        .saturating_sub(wildcard_penalty.saturating_mul(10_000))
+        .saturating_add(label_count.saturating_mul(100))
+        .saturating_add(literal_chars)
+}
+
+fn endpoint_path_specificity(path: &str) -> u32 {
+    if path.is_empty() || path == "**" {
+        return 0;
+    }
+    1_000_000u32.saturating_add(count_as_u32(path.chars().filter(|ch| *ch != '*').count()))
+}
+
+fn count_as_u32(count: usize) -> u32 {
+    u32::try_from(count).unwrap_or(u32::MAX)
+}
+
+fn host_patterns_can_overlap(first: &str, second: &str) -> bool {
+    let first = first.to_ascii_lowercase();
+    let second = second.to_ascii_lowercase();
+    if !first.contains('*') {
+        return host_pattern_matches(&second, &first);
+    }
+    if !second.contains('*') {
+        return host_pattern_matches(&first, &second);
+    }
+    let first_labels: Vec<&str> = first.split('.').collect();
+    let second_labels: Vec<&str> = second.split('.').collect();
+    host_pattern_labels_can_overlap(&first_labels, &second_labels)
+}
+
+fn host_pattern_labels_can_overlap(first: &[&str], second: &[&str]) -> bool {
+    match (first.split_first(), second.split_first()) {
+        (None, None) => true,
+        (None, Some((label, rest))) if *label == "**" => {
+            host_pattern_labels_can_overlap(first, rest)
+        }
+        (Some((label, rest)), None) if *label == "**" => {
+            host_pattern_labels_can_overlap(rest, second)
+        }
+        (None, _) | (_, None) => false,
+        (Some((label, rest)), _) if *label == "**" => {
+            host_pattern_labels_can_overlap(rest, second)
+                || host_pattern_labels_can_overlap(first, &second[1..])
+        }
+        (_, Some((label, rest))) if *label == "**" => {
+            host_pattern_labels_can_overlap(first, rest)
+                || host_pattern_labels_can_overlap(&first[1..], second)
+        }
+        (Some((first_label, first_rest)), Some((second_label, second_rest))) => {
+            (*first_label == "*" || *second_label == "*" || first_label == second_label)
+                && host_pattern_labels_can_overlap(first_rest, second_rest)
+        }
+    }
+}
+
+fn path_patterns_can_overlap(first: &str, second: &str) -> bool {
+    if path_matches_all(first) || path_matches_all(second) {
+        return true;
+    }
+    if !first.contains('*') {
+        return endpoint_path_matches(second, first);
+    }
+    if !second.contains('*') {
+        return endpoint_path_matches(first, second);
+    }
+    match (path_prefix_pattern(first), path_prefix_pattern(second)) {
+        (Some(first_prefix), Some(second_prefix)) => {
+            first_prefix == second_prefix
+                || first_prefix.starts_with(&format!("{second_prefix}/"))
+                || second_prefix.starts_with(&format!("{first_prefix}/"))
+        }
+        _ => true,
+    }
+}
+
+fn path_matches_all(path: &str) -> bool {
+    path.is_empty() || path == "**" || path == "/**"
+}
+
+fn path_prefix_pattern(path: &str) -> Option<&str> {
+    path.strip_suffix("/**")
+}
+
+fn endpoint_path_matches(pattern: &str, path: &str) -> bool {
+    if path_matches_all(pattern) {
+        return true;
+    }
+    if pattern == path {
+        return true;
+    }
+    if let Some(prefix) = path_prefix_pattern(pattern) {
+        return path == prefix || path.starts_with(&format!("{prefix}/"));
+    }
+    glob::Pattern::new(pattern).is_ok_and(|glob| glob.matches(path))
+}
+
+fn validate_token_grant_endpoint(token_endpoint: &str) -> Result<(), String> {
+    let url = url::Url::parse(token_endpoint)
+        .map_err(|_| "token_endpoint must be an absolute URL".to_string())?;
+    if token_endpoint_transport_allowed(&url) {
+        return Ok(());
+    }
+
+    Err(
+        "token_endpoint must use https, except http for loopback or in-cluster service hosts"
+            .to_string(),
+    )
+}
+
+fn validate_token_grant_auth_style(credential: &CredentialProfile) -> Result<(), String> {
+    match credential.auth_style.trim().to_ascii_lowercase().as_str() {
+        "" | "bearer" | "header" => Ok(()),
+        _ => Err("token_grant credentials support auth_style bearer or header".to_string()),
+    }
+}
+
+fn validate_token_grant_header_name(credential: &CredentialProfile) -> Result<(), String> {
+    let header_name = match credential.auth_style.trim().to_ascii_lowercase().as_str() {
+        "" | "bearer" if credential.header_name.trim().is_empty() => "Authorization",
+        "" | "bearer" | "header" => credential.header_name.trim(),
+        _ => return Ok(()),
+    };
+    if header_name.is_empty() {
+        return Ok(());
+    }
+    let valid = header_name.bytes().all(|byte| {
+        byte.is_ascii_alphanumeric()
+            || matches!(
+                byte,
+                b'!' | b'#'
+                    | b'$'
+                    | b'%'
+                    | b'&'
+                    | b'\''
+                    | b'*'
+                    | b'+'
+                    | b'-'
+                    | b'.'
+                    | b'^'
+                    | b'_'
+                    | b'`'
+                    | b'|'
+                    | b'~'
+            )
+    });
+    if !valid {
+        return Err("token_grant header_name is not a valid HTTP header name".to_string());
+    }
+    match header_name.to_ascii_lowercase().as_str() {
+        "host" | "content-length" | "transfer-encoding" | "connection" => Err(
+            "token_grant header_name may not override HTTP framing or connection headers"
+                .to_string(),
+        ),
+        _ => Ok(()),
+    }
+}
+
+fn token_endpoint_transport_allowed(url: &url::Url) -> bool {
+    match url.scheme() {
+        "https" => true,
+        "http" => url
+            .host_str()
+            .is_some_and(|host| is_loopback_host(host) || is_kubernetes_service_host(host)),
+        _ => false,
+    }
+}
+
+fn is_loopback_host(host: &str) -> bool {
+    let host = host.trim_matches(['[', ']']);
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+
+    match host.parse::<IpAddr>() {
+        Ok(IpAddr::V4(v4)) => v4.is_loopback(),
+        Ok(IpAddr::V6(v6)) => {
+            v6.is_loopback() || v6.to_ipv4_mapped().is_some_and(|v4| v4.is_loopback())
+        }
+        Err(_) => false,
+    }
+}
+
+fn is_kubernetes_service_host(host: &str) -> bool {
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    let labels = host.split('.').collect::<Vec<_>>();
+    let is_service_name = labels.len() == 3 && labels[2] == "svc";
+    let is_cluster_local_service =
+        labels.len() == 5 && labels[2] == "svc" && labels[3] == "cluster" && labels[4] == "local";
+    (is_service_name || is_cluster_local_service) && labels.iter().all(|label| !label.is_empty())
 }
 
 static DEFAULT_PROFILES: OnceLock<Vec<ProviderTypeProfile>> = OnceLock::new();
@@ -1249,13 +1723,14 @@ mod tests {
             vec!["service_account_token", "gcloud_adc_token"]
         );
         assert!(
-            profile.allows_gateway_refresh_bootstrap(),
+            profile.allows_empty_provider_credentials(),
             "Vertex profile should allow empty-create bootstrap via gateway-mintable credentials"
         );
     }
 
     #[test]
-    fn refresh_bootstrap_requires_a_gateway_mintable_path_and_no_required_static_credentials() {
+    fn empty_provider_credentials_require_a_runtime_resolvable_path_and_no_required_static_credentials()
+     {
         let optional_refresh_profile = parse_profile_yaml(
             r"
 id: optional-refresh
@@ -1268,7 +1743,21 @@ credentials:
 ",
         )
         .expect("profile");
-        assert!(optional_refresh_profile.allows_gateway_refresh_bootstrap());
+        assert!(optional_refresh_profile.allows_empty_provider_credentials());
+
+        let token_grant_profile = parse_profile_yaml(
+            r"
+id: token-grant
+display_name: Token Grant
+credentials:
+  - name: access_token
+    required: true
+    token_grant:
+      token_endpoint: https://auth.example.com/token
+",
+        )
+        .expect("profile");
+        assert!(token_grant_profile.allows_empty_provider_credentials());
 
         let mixed_required_profile = parse_profile_yaml(
             r"
@@ -1284,7 +1773,7 @@ credentials:
 ",
         )
         .expect("profile");
-        assert!(!mixed_required_profile.allows_gateway_refresh_bootstrap());
+        assert!(!mixed_required_profile.allows_empty_provider_credentials());
 
         let static_only_profile = parse_profile_yaml(
             r"
@@ -1296,7 +1785,7 @@ credentials:
 ",
         )
         .expect("profile");
-        assert!(!static_only_profile.allows_gateway_refresh_bootstrap());
+        assert!(!static_only_profile.allows_empty_provider_credentials());
     }
 
     #[test]
@@ -1436,6 +1925,317 @@ credentials:
         assert_eq!(
             reparsed.credentials[3].path_template,
             "/v1/{credential}/resources"
+        );
+    }
+
+    #[test]
+    fn token_grant_audience_overrides_round_trip_through_proto() {
+        let profile = parse_profile_yaml(
+            r"
+id: keycloak-example
+display_name: Keycloak Example
+credentials:
+  - name: access_token
+    auth_style: bearer
+    header_name: Authorization
+    token_grant:
+      token_endpoint: http://keycloak.default.svc.cluster.local/realms/openshell/protocol/openid-connect/token
+      jwt_svid_audience: http://keycloak.default.svc.cluster.local/realms/openshell
+      client_assertion_type: urn:ietf:params:oauth:client-assertion-type:jwt-spiffe
+      audience: api://default
+      scopes: [openid]
+      cache_ttl_seconds: 300
+      audience_overrides:
+        - host: alpha.default.svc.cluster.local
+          port: 80
+          audience: api://alpha
+        - host: beta.default.svc.cluster.local
+          port: 80
+          path: /v1/**
+          audience: api://beta
+          scopes: [beta.read]
+",
+        )
+        .expect("profile should parse");
+
+        let token_grant = profile.credentials[0]
+            .token_grant
+            .as_ref()
+            .expect("token grant should parse");
+        assert_eq!(
+            token_grant.jwt_svid_audience,
+            "http://keycloak.default.svc.cluster.local/realms/openshell"
+        );
+        assert_eq!(
+            token_grant.client_assertion_type,
+            "urn:ietf:params:oauth:client-assertion-type:jwt-spiffe"
+        );
+        assert_eq!(token_grant.audience_overrides.len(), 2);
+        assert_eq!(token_grant.audience_overrides[1].path, "/v1/**");
+        assert_eq!(token_grant.audience_overrides[1].scopes, vec!["beta.read"]);
+
+        let reparsed = ProviderTypeProfile::from_proto(&profile.to_proto());
+        let reparsed_token_grant = reparsed.credentials[0]
+            .token_grant
+            .as_ref()
+            .expect("token grant should round trip");
+        assert_eq!(
+            reparsed_token_grant.jwt_svid_audience,
+            token_grant.jwt_svid_audience
+        );
+        assert_eq!(
+            reparsed_token_grant.audience_overrides,
+            token_grant.audience_overrides
+        );
+    }
+
+    #[test]
+    fn validate_profile_set_rejects_plain_http_token_endpoint() {
+        for token_endpoint in [
+            "http://auth.example.com/token",
+            "http://token-issuer.default.svc.evil.com/token",
+        ] {
+            let profile = parse_profile_yaml(&format!(
+                r"
+id: insecure-token-grant
+display_name: Insecure Token Grant
+credentials:
+  - name: access_token
+    auth_style: bearer
+    header_name: Authorization
+    token_grant:
+      token_endpoint: {token_endpoint}
+      audience: api://default
+"
+            ))
+            .expect("profile should parse");
+
+            let diagnostics = validate_profile_set(&[("insecure.yaml".to_string(), profile)]);
+            let diagnostic = diagnostics
+                .iter()
+                .find(|diagnostic| diagnostic.field == "credentials.token_grant.token_endpoint")
+                .expect("token endpoint diagnostic should be reported");
+
+            assert_eq!(
+                diagnostic.message,
+                "token_endpoint must use https, except http for loopback or in-cluster service hosts"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_profile_set_allows_https_loopback_and_in_cluster_token_endpoints() {
+        for token_endpoint in [
+            "https://auth.example.com/token",
+            "http://127.0.0.1:8180/token",
+            "http://token-issuer.default.svc.cluster.local/token",
+        ] {
+            let profile = parse_profile_yaml(&format!(
+                r"
+id: secure-token-grant
+display_name: Secure Token Grant
+credentials:
+  - name: access_token
+    auth_style: bearer
+    header_name: Authorization
+    token_grant:
+      token_endpoint: {token_endpoint}
+      audience: api://default
+"
+            ))
+            .expect("profile should parse");
+
+            let diagnostics = validate_profile_set(&[("secure.yaml".to_string(), profile)]);
+            assert!(
+                diagnostics.is_empty(),
+                "unexpected diagnostics for {token_endpoint}: {diagnostics:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_profile_set_rejects_relative_token_endpoint() {
+        let profile = parse_profile_yaml(
+            r"
+id: relative-token-grant
+display_name: Relative Token Grant
+credentials:
+  - name: access_token
+    auth_style: bearer
+    header_name: Authorization
+    token_grant:
+      token_endpoint: /token
+      audience: api://default
+",
+        )
+        .expect("profile should parse");
+
+        let diagnostics = validate_profile_set(&[("relative.yaml".to_string(), profile)]);
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.field == "credentials.token_grant.token_endpoint")
+            .expect("token endpoint diagnostic should be reported");
+
+        assert_eq!(diagnostic.message, "token_endpoint must be an absolute URL");
+    }
+
+    #[test]
+    fn validate_profile_set_rejects_token_grant_query_or_path_auth_style() {
+        for auth_style in ["query", "path"] {
+            let profile = parse_profile_yaml(&format!(
+                r"
+id: unsupported-token-grant-style
+display_name: Unsupported Token Grant Style
+credentials:
+  - name: access_token
+    auth_style: {auth_style}
+    token_grant:
+      token_endpoint: https://auth.example.com/token
+"
+            ))
+            .expect("profile should parse");
+
+            let diagnostics = validate_profile_set(&[("unsupported.yaml".to_string(), profile)]);
+            let diagnostic = diagnostics
+                .iter()
+                .find(|diagnostic| diagnostic.field == "credentials.token_grant.auth_style")
+                .expect("auth style diagnostic should be reported");
+
+            assert_eq!(
+                diagnostic.message,
+                "token_grant credentials support auth_style bearer or header"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_profile_set_requires_header_name_for_token_grant_header_auth_style() {
+        let profile = parse_profile_yaml(
+            r"
+id: missing-header-token-grant
+display_name: Missing Header Token Grant
+credentials:
+  - name: access_token
+    auth_style: header
+    token_grant:
+      token_endpoint: https://auth.example.com/token
+",
+        )
+        .expect("profile should parse");
+
+        let diagnostics = validate_profile_set(&[("missing-header.yaml".to_string(), profile)]);
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.field == "credentials.header_name")
+            .expect("header_name diagnostic should be reported");
+
+        assert_eq!(
+            diagnostic.message,
+            "header_name is required for header auth"
+        );
+    }
+
+    #[test]
+    fn validate_profile_set_rejects_token_grant_framing_header_name() {
+        let profile = parse_profile_yaml(
+            r"
+id: framing-header-token-grant
+display_name: Framing Header Token Grant
+credentials:
+  - name: access_token
+    auth_style: header
+    header_name: Content-Length
+    token_grant:
+      token_endpoint: https://auth.example.com/token
+",
+        )
+        .expect("profile should parse");
+
+        let diagnostics = validate_profile_set(&[("framing.yaml".to_string(), profile)]);
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| {
+                diagnostic.field == "credentials.header_name"
+                    && diagnostic.message.contains("HTTP framing")
+            })
+            .expect("framing header diagnostic should be reported");
+
+        assert_eq!(
+            diagnostic.message,
+            "token_grant header_name may not override HTTP framing or connection headers"
+        );
+    }
+
+    #[test]
+    fn validate_profile_set_rejects_ambiguous_same_credential_audience_overrides() {
+        let profile = parse_profile_yaml(
+            r"
+id: ambiguous-token-grant
+display_name: Ambiguous Token Grant
+credentials:
+  - name: access_token
+    auth_style: bearer
+    header_name: Authorization
+    token_grant:
+      token_endpoint: https://auth.example.com/token
+      audience: api://default
+      audience_overrides:
+        - audience: api://alpha
+        - host: alpha.default.svc.cluster.local
+          audience: api://beta
+endpoints:
+  - host: alpha.default.svc.cluster.local
+    port: 80
+    path: /v1/**
+",
+        )
+        .expect("profile should parse");
+
+        let diagnostics = validate_profile_set(&[("ambiguous.yaml".to_string(), profile)]);
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.field == "credentials.token_grant.audience_overrides")
+            .expect("audience override diagnostic should be reported");
+
+        assert!(
+            diagnostic
+                .message
+                .contains("ambiguous token_grant audience_overrides")
+        );
+        assert!(diagnostic.message.contains("indexes 0 and 1"));
+    }
+
+    #[test]
+    fn validate_profile_set_allows_more_specific_audience_override_path() {
+        let profile = parse_profile_yaml(
+            r"
+id: specific-token-grant
+display_name: Specific Token Grant
+credentials:
+  - name: access_token
+    auth_style: bearer
+    header_name: Authorization
+    token_grant:
+      token_endpoint: https://auth.example.com/token
+      audience: api://default
+      audience_overrides:
+        - path: /v1/**
+          audience: api://alpha
+        - path: /v1/admin/**
+          audience: api://admin
+endpoints:
+  - host: alpha.default.svc.cluster.local
+    port: 80
+    path: /v1/**
+",
+        )
+        .expect("profile should parse");
+
+        let diagnostics = validate_profile_set(&[("specific.yaml".to_string(), profile)]);
+
+        assert!(
+            diagnostics.is_empty(),
+            "unexpected diagnostics: {diagnostics:?}"
         );
     }
 

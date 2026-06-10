@@ -3,6 +3,7 @@
 
 use openshell_core::config::DEFAULT_SUPERVISOR_IMAGE;
 use serde::{Deserialize, Deserializer, Serialize};
+use std::path::Path;
 use std::str::FromStr;
 
 /// Default Kubernetes namespace for sandbox resources.
@@ -143,6 +144,18 @@ where
     }
 }
 
+fn deserialize_provider_spiffe_workload_api_socket_path<'de, D>(
+    deserializer: D,
+) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = String::deserialize(deserializer)?;
+    validate_provider_spiffe_workload_api_socket_path_value(&value)
+        .map_err(serde::de::Error::custom)?;
+    Ok(value)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct KubernetesComputeConfig {
@@ -190,6 +203,14 @@ pub struct KubernetesComputeConfig {
     /// this token within a few seconds of pod start, so any value at
     /// the floor is sufficient. Default 3600.
     pub sa_token_ttl_secs: i64,
+    /// SPIFFE Workload API socket path mounted into sandbox pods for dynamic
+    /// provider token grants. Empty disables provider token-grant SPIFFE
+    /// material.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_provider_spiffe_workload_api_socket_path"
+    )]
+    pub provider_spiffe_workload_api_socket_path: String,
 }
 
 /// Lower bound enforced by kubelet for projected SA tokens.
@@ -224,6 +245,7 @@ impl Default for KubernetesComputeConfig {
             workspace_default_storage_size: DEFAULT_WORKSPACE_STORAGE_SIZE.to_string(),
             default_runtime_class_name: String::new(),
             sa_token_ttl_secs: 3600,
+            provider_spiffe_workload_api_socket_path: String::new(),
         }
     }
 }
@@ -241,6 +263,52 @@ impl KubernetesComputeConfig {
                 .clamp(MIN_SA_TOKEN_TTL_SECS, MAX_SA_TOKEN_TTL_SECS)
         }
     }
+
+    #[must_use]
+    pub fn provider_spiffe_enabled(&self) -> bool {
+        !self
+            .provider_spiffe_workload_api_socket_path
+            .trim()
+            .is_empty()
+    }
+
+    pub fn validate_provider_spiffe_workload_api_socket_path(&self) -> Result<(), String> {
+        validate_provider_spiffe_workload_api_socket_path_value(
+            &self.provider_spiffe_workload_api_socket_path,
+        )
+    }
+}
+
+fn validate_provider_spiffe_workload_api_socket_path_value(
+    socket_path: &str,
+) -> Result<(), String> {
+    let trimmed = socket_path.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+    if trimmed != socket_path {
+        return Err(
+            "provider_spiffe_workload_api_socket_path must not contain leading or trailing whitespace"
+                .to_string(),
+        );
+    }
+    let path = Path::new(socket_path);
+    if !path.is_absolute() {
+        return Err(
+            "provider_spiffe_workload_api_socket_path must be an absolute UNIX socket path"
+                .to_string(),
+        );
+    }
+    let parent = path.parent().ok_or_else(|| {
+        "provider_spiffe_workload_api_socket_path must include a parent directory".to_string()
+    })?;
+    if parent == Path::new("/") {
+        return Err(
+            "provider_spiffe_workload_api_socket_path must live below a dedicated directory"
+                .to_string(),
+        );
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -343,6 +411,35 @@ mod tests {
         });
         let cfg: KubernetesComputeConfig = serde_json::from_value(json).unwrap();
         assert_eq!(cfg.app_armor_profile, None);
+    }
+
+    #[test]
+    fn serde_accepts_absolute_provider_spiffe_socket_path() {
+        let json = serde_json::json!({
+            "provider_spiffe_workload_api_socket_path": "/spiffe-workload-api/spire-agent.sock"
+        });
+        let cfg: KubernetesComputeConfig = serde_json::from_value(json).unwrap();
+        cfg.validate_provider_spiffe_workload_api_socket_path()
+            .unwrap();
+    }
+
+    #[test]
+    fn serde_rejects_invalid_provider_spiffe_socket_path() {
+        for socket_path in [
+            "spiffe-workload-api/spire-agent.sock",
+            "/spire-agent.sock",
+            " /spiffe-workload-api/spire-agent.sock",
+        ] {
+            let json = serde_json::json!({
+                "provider_spiffe_workload_api_socket_path": socket_path
+            });
+            let err = serde_json::from_value::<KubernetesComputeConfig>(json).unwrap_err();
+            assert!(
+                err.to_string()
+                    .contains("provider_spiffe_workload_api_socket_path"),
+                "unexpected error for {socket_path}: {err}"
+            );
+        }
     }
 
     #[test]
