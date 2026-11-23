@@ -624,7 +624,7 @@ operating-system CVEs remain the responsibility of the standalone scan.
 
 Org members and collaborators sign their commits cryptographically.
 
-DCO sign-off (`-s` / `Signed-off-by`) is a separate requirement and does not count as commit signing. Dependabot-authored dependency update PRs are allowlisted in DCO Assistant because the bot cannot sign commits.
+DCO sign-off (`-s` / `Signed-off-by`) is a separate requirement and does not count as commit signing.
 
 ### One-time setup with an SSH key
 

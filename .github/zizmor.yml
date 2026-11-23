@@ -6,7 +6,6 @@ rules:
     ignore:
       # These base-branch workflows never check out or execute pull request
       # head code. Keep each suppression scoped to its reviewed trigger block.
-      - dco.yml:3
       - maintainers-change-alert.yml:6
       - pr-issue-acceptance.yml:6
       - release-canary.yml:3

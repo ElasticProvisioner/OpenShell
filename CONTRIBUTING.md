@@ -560,7 +560,7 @@ chore(deps): bump tokio to 1.40
 
 ### DCO
 
-All human contributions must include a `Signed-off-by` line in each commit message. This certifies you have the right to submit the work under the project license. Dependabot-authored dependency update PRs are allowlisted because the bot cannot sign commits.
+All human contributions must include a `Signed-off-by` line in each commit message. This certifies you have the right to submit the work under the project license. The DCO check fails a PR if any of its commits lacks the trailer; add it with `git rebase --signoff` and force-push.
 
 The project uses version 1.1 of the [Developer Certificate of Origin](https://developercertificate.org/):
 
@@ -607,7 +607,7 @@ git commit --signoff --message "feat(sandbox): add new capability"
 
 DCO sign-off is separate from cryptographic commit signing, and the two have different requirements:
 
-- **DCO sign-off** (`--signoff`) adds the `Signed-off-by` trailer to each commit. It applies to every contributor. The DCO Assistant bot also asks you to sign the DCO once, by commenting on your PR.
+- **DCO sign-off** (`--signoff`) adds the `Signed-off-by` trailer to each commit. It applies to every contributor and every commit.
 - **Cryptographic commit signing** applies to org members and collaborators only; see [CI.md](CI.md#commit-signing) for setup.
 
 ### PR testing checklist
