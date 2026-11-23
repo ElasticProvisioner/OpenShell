@@ -16,4 +16,4 @@ npm install @ai-openshell/sdk
 grep -rlE --exclude-dir=node_modules '@nvidia/openshell-sdk' . | xargs perl -pi -e 's#\@nvidia/openshell-sdk#\@ai-openshell/sdk#g'
 ```
 
-SDK releases follow core releases, so SDK `X.Y.Z` works with a gateway from OpenShell `vX.Y.Z`. The move is tracked in [#5480](https://github.com/NVIDIA/OpenShell/issues/5480).
+SDK releases follow core releases, so SDK `X.Y.Z` works with a gateway from OpenShell `vX.Y.Z`. The move is tracked in [#5480](https://github.com/ai-openshell/openshell/issues/5480).
