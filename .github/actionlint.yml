@@ -3,6 +3,8 @@
 
 self-hosted-runner:
   labels:
+    - openshell-hosted-amd64-16
+    - openshell-hosted-arm64-16
     - ubuntu-26.04
     - windows-arm64
 
