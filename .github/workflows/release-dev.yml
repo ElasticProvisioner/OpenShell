@@ -215,6 +215,10 @@ jobs:
     timeout-minutes: 10
     # Only jobs in this environment can trade their OIDC token for the Quay robot.
     environment: release
+    # GitHub-hosted runners also ship podman, which the engine helper
+    # prefers; verify-image-sbom.sh needs Docker's buildx imagetools.
+    env:
+      CONTAINER_ENGINE: docker
     permissions:
       contents: read
       id-token: write
