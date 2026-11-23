@@ -346,6 +346,12 @@ mise trust
 mise run gateway
 ```
 
+The workspace build, check, lint, and test tasks (`build:rust:workspace`,
+`rust:check`, `rust:lint`, `test:rust`) and CI Branch Checks enable the
+`experimental` feature flag. Standalone launchers such as `mise run gateway`
+and direct Cargo builds leave it off unless you pass `--features experimental`;
+prerelease and stable builds leave it off as well.
+
 ## Building the `openshell` CLI
 
 Inside this repository, `openshell` is a local shortcut script at `scripts/bin/openshell`. The script will

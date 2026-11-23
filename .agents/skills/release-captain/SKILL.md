@@ -46,6 +46,9 @@ tag, or start a second `Pre-release` run for a tag; it has no concurrency guard.
   repository must exist and Actions must have a `BUF_TOKEN` secret with write
   access. A failed Buf push fails the release run; follow Recovery before
   rerunning the failed publication job.
+- Pre-release and stable builds leave the `experimental` feature disabled. Release
+  Dev enables it through `experimental: true`. Normal workspace builds, lint,
+  and tests enable `experimental` without separate CI lanes for development features.
 
 ## Setup
 

@@ -127,6 +127,7 @@ jobs:
     with:
       checkout-ref: ${{ needs.pr_metadata.outputs.sha }}
       cargo-version: ${{ needs.version.outputs.cargo }}
+      experimental: true
     secrets:
       CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
@@ -138,6 +139,7 @@ jobs:
     with:
       checkout-ref: ${{ needs.pr_metadata.outputs.sha }}
       cargo-version: ${{ needs.version.outputs.cargo }}
+      experimental: true
     secrets:
       CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
