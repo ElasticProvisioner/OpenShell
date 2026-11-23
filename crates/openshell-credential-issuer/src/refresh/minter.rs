@@ -2009,6 +2009,23 @@ pM2zFU8SeVkvHKlEuoHaP0s=
         }
     }
 
+    #[test]
+    fn persisted_endpoint_allowlists_distinguish_literal_and_encoded_carets() {
+        let literal = "https://login.example/a^b";
+        let encoded = "https://login.example/a%5Eb";
+        for (allowed, denied) in [(literal, encoded), (encoded, literal)] {
+            let stored = [vec![allowed.to_string()]];
+            assert!(
+                ensure_endpoint_allowed(allowed, &stored).is_ok(),
+                "{allowed}"
+            );
+            assert!(
+                ensure_endpoint_allowed(denied, &stored).is_err(),
+                "{denied}"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn secret_bound_mint_reaches_an_allowed_endpoint() {
         let mock_server = MockServer::start().await;
@@ -2151,13 +2168,13 @@ pM2zFU8SeVkvHKlEuoHaP0s=
             strategy: ProviderCredentialRefreshStrategy::GithubAppInstallation as i32,
             material: HashMap::from([("installation_id".into(), "123".into())]),
             token_url:
-                "https://github.example/api/v3/app/installations/{installation_id}/access_tokens"
+                "https://github.example/a^b/api/v3/app/installations/{installation_id}/access_tokens"
                     .into(),
             ..Default::default()
         };
         assert_eq!(
             effective_token_endpoint(&github).unwrap(),
-            "https://github.example/api/v3/app/installations/123/access_tokens"
+            "https://github.example/a^b/api/v3/app/installations/123/access_tokens"
         );
         let aws = MintRequest {
             strategy: ProviderCredentialRefreshStrategy::AwsStsAssumeRole as i32,
