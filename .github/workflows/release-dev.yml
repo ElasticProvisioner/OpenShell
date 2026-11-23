@@ -284,6 +284,9 @@ jobs:
   publish-snap:
     name: Publish snap
     needs: build-snap
+    # TODO: Move dev snap publishing to the upcoming packages repository under
+    # ai-openshell. Keep disabled here until that migration.
+    if: ${{ success() && false }}
     permissions:
       actions: read
       contents: read
