@@ -75,3 +75,11 @@ runtime tarball. Verify a downloaded runtime with:
 ```bash
 gh attestation verify vm-runtime-linux-x86_64.tar.zst -R ai-openshell/openshell
 ```
+
+Runtimes built before the repository moved from `NVIDIA/OpenShell` are attested
+under the NVIDIA account, and GitHub no longer finds those attestations through
+the repository. Verify them by the old owner:
+
+```bash
+gh attestation verify vm-runtime-linux-x86_64.tar.zst --owner NVIDIA --signer-repo NVIDIA/OpenShell
+```
