@@ -4,7 +4,8 @@
 name: Release Helm OCI
 description: >
   Patch chart version/appVersion, package the gateway and workspace charts, and
-  push them to GHCR OCI. Public releases never overwrite published versions.
+  push them to oci://quay.io/ai-openshell/charts. Public releases never
+  overwrite published versions.
 
 inputs:
   chart-version:
@@ -20,14 +21,6 @@ inputs:
   release-kind:
     description: "dev or public — controls the duplicate-version guard."
     required: true
-  registry-namespace:
-    description: "GHCR namespace without the oci:// prefix."
-    required: false
-    default: ghcr.io/nvidia/openshell
-  image-registry:
-    description: "Override global.image.registry in the packaged gateway chart."
-    required: false
-    default: ""
   pin-sha:
     description: >
       Full commit SHA. When set on dev releases, a second chart is also pushed
@@ -41,22 +34,21 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Log in to GHCR
-      uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4
-      with:
-        registry: ghcr.io
-        username: ${{ github.actor }}
-        password: ${{ github.token }}
-
     - name: Install Helm
       uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+
+    # Needs id-token: write and the release environment on the calling job.
+    - name: Log in to Quay
+      uses: ai-openshell/workflows/quay-login@96e33d5551ba4e706203648eb90710c48466e543 # main
+      with:
+        robot: ai-openshell+openshell_release
+        clients: helm
 
     - name: Stage chart and patch version
       id: prep
       env:
         CHART_VERSION: ${{ inputs.chart-version }}
         APP_VERSION: ${{ inputs.app-version }}
-        IMAGE_REGISTRY: ${{ inputs.image-registry }}
       shell: bash
       run: |
         set -euo pipefail
@@ -68,10 +60,6 @@ runs:
           sed -i "s/^version:.*/version: ${CHART_VERSION}/" "${chart_dir}/Chart.yaml"
           sed -i "s/^appVersion:.*/appVersion: \"${APP_VERSION}\"/" "${chart_dir}/Chart.yaml"
         done
-        if [[ -n "${IMAGE_REGISTRY}" ]]; then
-          sed -i "s|^    registry: ghcr.io/nvidia$|    registry: ${IMAGE_REGISTRY}|" "${GATEWAY_CHART_DIR}/values.yaml"
-          grep -Fxq "    registry: ${IMAGE_REGISTRY}" "${GATEWAY_CHART_DIR}/values.yaml"
-        fi
         echo "gateway_chart_dir=${GATEWAY_CHART_DIR}" >> "$GITHUB_OUTPUT"
         echo "workspace_chart_dir=${WORKSPACE_CHART_DIR}" >> "$GITHUB_OUTPUT"
         echo "chart_version=${CHART_VERSION}" >> "$GITHUB_OUTPUT"
@@ -83,18 +71,17 @@ runs:
       if: inputs.release-kind == 'public'
       env:
         CHART_VERSION: ${{ steps.prep.outputs.chart_version }}
-        REGISTRY_NAMESPACE: ${{ inputs.registry-namespace }}
       shell: bash
       run: |
         set -euo pipefail
         found=0
-        for chart in helm-chart openshell-workspace; do
-          OCI_CHART="oci://${REGISTRY_NAMESPACE}/${chart}"
+        for chart in openshell openshell-workspace; do
+          OCI_CHART="oci://quay.io/ai-openshell/charts/${chart}"
           # Only "not found" means unpublished; any other lookup error fails
           # rather than risk overwriting.
           if lookup_error=$(helm show chart "${OCI_CHART}" --version "${CHART_VERSION}" 2>&1 >/dev/null); then
             found=$((found + 1))
-          elif [[ "${lookup_error}" != *"${REGISTRY_NAMESPACE}/${chart}:${CHART_VERSION}: not found"* ]]; then
+          elif [[ "${lookup_error}" != *"quay.io/ai-openshell/charts/${chart}:${CHART_VERSION}: not found"* ]]; then
             echo "::error::Could not check whether ${chart}:${CHART_VERSION} is published: ${lookup_error}"
             exit 1
           fi
@@ -120,20 +107,18 @@ runs:
         helm package "${WORKSPACE_CHART_DIR}" --destination /tmp/helm-charts
         ls /tmp/helm-charts/*.tgz
 
-    - name: Push Helm chart to GHCR OCI
+    - name: Push Helm chart to Quay
       if: steps.published.outputs.published != 'true'
-      env:
-        REGISTRY_NAMESPACE: ${{ inputs.registry-namespace }}
       shell: bash
       run: |
         set -euo pipefail
         # Helm pushes the manifest by digest, then fetches it back to tag it.
-        # GHCR can briefly return 404 for a manifest it just accepted, so
-        # retry. Re-pushing the same archive is idempotent.
+        # A registry can briefly return 404 for a manifest it just accepted,
+        # so retry. Re-pushing the same archive is idempotent.
         push_chart() {
           local attempt
           for attempt in 1 2 3 4; do
-            if helm push "$1" "oci://${REGISTRY_NAMESPACE}"; then
+            if helm push "$1" oci://quay.io/ai-openshell/charts; then
               return 0
             fi
             if [ "${attempt}" -lt 4 ]; then
@@ -151,17 +136,16 @@ runs:
       if: inputs.pin-sha != ''
       env:
         PIN_SHA: ${{ inputs.pin-sha }}
-        REGISTRY_NAMESPACE: ${{ inputs.registry-namespace }}
         GATEWAY_CHART_DIR: ${{ steps.prep.outputs.gateway_chart_dir }}
         WORKSPACE_CHART_DIR: ${{ steps.prep.outputs.workspace_chart_dir }}
       shell: bash
       run: |
         set -euo pipefail
-        # See "Push Helm chart to GHCR OCI" for why pushes retry.
+        # See "Push Helm chart to Quay" for why pushes retry.
         push_chart() {
           local attempt
           for attempt in 1 2 3 4; do
-            if helm push "$1" "oci://${REGISTRY_NAMESPACE}"; then
+            if helm push "$1" oci://quay.io/ai-openshell/charts; then
               return 0
             fi
             if [ "${attempt}" -lt 4 ]; then

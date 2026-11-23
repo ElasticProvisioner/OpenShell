@@ -560,8 +560,11 @@ jobs:
     needs: [release-dev, tag-ghcr-dev]
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Only jobs in this environment can trade their OIDC token for the Quay robot.
+    environment: release
     permissions:
-      packages: write
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -572,8 +575,6 @@ jobs:
           chart-version: 0.0.0-dev
           app-version: dev
           release-kind: dev
-          registry-namespace: ghcr.io/ai-openshell/openshell
-          image-registry: ghcr.io/ai-openshell
           pin-sha: ${{ github.sha }}
 
   publish-fern-docs:
