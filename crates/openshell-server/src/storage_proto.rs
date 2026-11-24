@@ -222,6 +222,14 @@ mod tests {
     // Sandbox-wide grant reporting adds TokenGrantFailureObservation to both
     // closures and TokenGrantStatus to public reports. Older rows have no grant
     // record; absent report extensions retain compatibility without a rewrite.
+    // Cedar policies add the explicitly present CedarPolicy message and the gateway-managed
+    // provider_credential_rules map to SandboxPolicy in both closures. Existing
+    // rows decode no Cedar message and remain YAML policies.
+    // Cedar endpoint settings add the repeated endpoint_settings field to
+    // SandboxPolicy in both closures. Existing rows decode it empty, so stored
+    // Cedar policies keep their current behavior.
+    // SupervisorHello and GetSandboxConfigRequest negotiate Cedar support with
+    // public-only capability fields; durable schemas remain unchanged.
     // Supervisor middleware binding policy and selectors are public-only. An
     // absent policy preserves dynamic discovery; older supervisors ignore both fields.
     // Suspend/resume adds two public request messages without durable request
@@ -242,13 +250,13 @@ mod tests {
     // public-only messages alongside main's public APIs; durable schemas
     // and the public/durable overlap remain unchanged.
     const PUBLIC_RPC_SCHEMA_SHA256: &str =
-        "3f6f958d6907255c148c366a45bd998beddd39432f2165bebe6c060eb28ef10c";
+        "dc96b55350209d252c8eb22a697fede2abf26d6bcb80223774c5fa093dca885b";
     // The storage.v2 refresh root adds retired handles and the first mint's
     // provider revision. All fields from the prior root retain their wire tags.
     const DURABLE_SCHEMA_SHA256: &str =
-        "e956b54b3f121eaae7d492437a3fa8f56fb3c8bbe8d3366a46dd730caed63203";
+        "1005cf2557d49ea54a302cc76d837cc1a6c637adb0db73ec9444569e8d39fd71";
     const PUBLIC_DURABLE_OVERLAP_SHA256: &str =
-        "c0c3ea17f105aaa6d843c466fd4240451c2105dce7675384935d4aaecdac8abf";
+        "c7a66485b85999c0227d1eef52b159b3be5c05d68c0a900f5f6303021a46d75f";
     // Encoded with the schema that omitted stable_placeholder. Keep these
     // bytes fixed so the current encoder cannot hide a compatibility change.
     const LEGACY_STATIC_PROFILE: &str = "0a240a116c65676163792d70726f66696c652d6964120d6c65676163792d737461746963280712510a0d6c65676163792d73746174696312184c6567616379207374617469632063726564656e7469616c2a260a076170695f6b65791a1153594e5448455449435f4150495f4b455920012a06626561726572";
@@ -792,9 +800,9 @@ mod tests {
                 overlap_hash.as_str(),
             ),
             (
-                (367, 31),
-                (102, 22),
-                (86, 22),
+                (369, 31),
+                (104, 22),
+                (88, 22),
                 PUBLIC_RPC_SCHEMA_SHA256,
                 DURABLE_SCHEMA_SHA256,
                 PUBLIC_DURABLE_OVERLAP_SHA256

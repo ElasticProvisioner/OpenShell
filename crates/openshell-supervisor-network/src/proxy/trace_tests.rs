@@ -106,6 +106,7 @@ async fn forward_denials_use_the_saved_connect_parent() {
                     matched_policy: None,
                 },
                 policy_generation: 1,
+                engine: "opa",
                 identity: ProcessIdentityEvidence::Available,
                 endpoint: EndpointDecision::default(),
                 binary: None,

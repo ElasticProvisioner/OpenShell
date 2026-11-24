@@ -3214,8 +3214,8 @@ message UpdateConfigRequest {
   // The new policy to apply.
   //
   // Sandbox scope (`global=false`):
-  // - only network_policies may differ from create-time
-  //   policy; static fields must match version 1.
+  // - only network_policies and cedar_policy may differ from
+  //   create-time policy; static fields must match version 1.
   //
   // Global scope (`global=true`):
   // - applies to all sandboxes in full (no merge).
@@ -3551,6 +3551,9 @@ message SupervisorHello {
   // Gateways push configuration only to supervisors that set this.
   bool supports_config_push = 7;
   bool supports_service_advertisements = 8;
+  // Versioned capabilities of the supervisor's compiled policy backends.
+  // Missing capabilities never authorize a policy requiring that backend.
+  repeated string supported_capabilities = 9;
 }
 
 // Gateway accepts the supervisor session.

@@ -14,6 +14,7 @@ fn allowed_decision(intent: EgressIntent) -> EgressDecision {
             matched_policy: Some("proxy_compatibility".to_string()),
         },
         policy_generation: 0,
+        engine: "opa",
         identity: ProcessIdentityEvidence::Available,
         endpoint: EndpointDecision::default(),
         binary: Some(PathBuf::from("/usr/bin/curl")),
@@ -247,6 +248,7 @@ fn representative_adapter_allows_preserve_ocsf_fields() {
         &Process::from_bypass("/usr/bin/curl", "42", "/usr/bin/sh").with_cmd_line("curl --proxy"),
         "proxy_compatibility",
         true,
+        "opa",
     ))
     .unwrap();
     assert_eq!(connect["class_name"], "Network Activity");
@@ -270,6 +272,7 @@ fn representative_adapter_allows_preserve_ocsf_fields() {
         "/v1/items",
         &Process::from_bypass("/usr/bin/curl", "42", "/usr/bin/sh").with_cmd_line("curl --proxy"),
         "proxy_compatibility",
+        "opa",
     ))
     .unwrap();
     assert_eq!(forward["class_name"], "HTTP Activity");
@@ -337,7 +340,7 @@ network_policies:
     // combined authorization query must deny rather than preserve the old
     // multi-query behavior that could fall back to an L4-only allow.
     let decision = evaluate_endpoint_only_opa(
-        &engine,
+        &PolicyEngine::from(Arc::new(engine)),
         EgressIntent::connect("sub\0.example.com".to_string(), 443),
     );
 
@@ -366,7 +369,7 @@ network_policies:
 "#,
     )
     .unwrap();
-    let input = |binary_path: PathBuf| crate::opa::NetworkInput {
+    let input = |binary_path: PathBuf| crate::policy_types::NetworkInput {
         host: "target.example".to_string(),
         port: 443,
         binary_path,
@@ -402,7 +405,7 @@ fn identity_required_mode_is_explicitly_unsupported_off_linux() {
             "127.0.0.1:41000".parse().unwrap(),
             "127.0.0.1:3000".parse().unwrap(),
         ),
-        &engine,
+        &PolicyEngine::from(Arc::new(engine)),
         &BinaryIdentityCache::new(),
         &AtomicU32::new(1),
         EgressIntent::connect("target.example".to_string(), 443),

@@ -440,3 +440,7 @@ description = "Test generated local gateway TOML without starting a runtime"
 run = "bash tasks/scripts/test-gateway-config.sh"
 run_windows = "echo Skipping test:gateway-config: Unix gateway scripts do not apply on Windows."
 hide = true
+
+["e2e:cedar"]
+description = "Run the focused Cedar suite against an already running development gateway and supervisor"
+run = "bash e2e/cedar/test.sh"

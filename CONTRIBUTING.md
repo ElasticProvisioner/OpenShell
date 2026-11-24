@@ -352,6 +352,12 @@ The workspace build, check, lint, and test tasks (`build:rust:workspace`,
 and direct Cargo builds leave it off unless you pass `--features experimental`;
 prerelease and stable builds leave it off as well.
 
+Workspace builds select the Cedar runtime member and unify its shared policy
+features, so use per-package checks to verify that Cedar is excluded.
+
+The `experimental` build flag includes Cedar. Build the gateway and supervisor
+with `--features experimental`, or use published Release Dev artifacts.
+
 ## Building the `openshell` CLI
 
 Inside this repository, `openshell` is a local shortcut script at `scripts/bin/openshell`. The script will
@@ -431,12 +437,18 @@ The TypeScript SDK moved to [ai-openshell/sdk-typescript](https://github.com/ai-
 | --------------- | --------------------------------------------- |
 | `crates/`       | Rust crates                                   |
 | `crates/openshell-policy-schema/` | Canonical authored policy DTOs and bounded YAML/JSON parser |
+| `crates/openshell-policy-cedar/` | Validation and evaluation for Cedar-authored sandbox policies, enabled by the development `experimental` feature |
+| `crates/openshell-policy-cedar-schema/` | Canonical Cedar schema and entity, action, and context names, linked only with the `experimental` feature |
+| `crates/openshell-policy-cedar-adapter/` | Cedar analysis adapted to policy messages for gateway and runtime composition |
+| `crates/openshell-policy-cedar-runtime/` | Cedar implementation of the shared runtime contracts, selected by supervisor composition |
+| `crates/openshell-policy-runtime-interface/` | Shared policy decisions, request metadata, snapshots, and staged reload contracts; no engine implementations |
 | `crates/openshell-prover-cli/` | Standalone local policy boundary checker |
 | `python/`       | Python SDK (frozen, moved to ai-openshell/sdk-python) |
 | `sdk/typescript/` | Deprecated `@nvidia/openshell-sdk` stub re-exporting `@ai-openshell/sdk` (moved to ai-openshell/sdk-typescript) |
 | `proto/`        | Protocol buffer definitions and [public API conventions](proto/README.md) |
 | `tasks/`        | `mise` task definitions and build scripts     |
 | `tests/testkit/` | Support library for SDK-driven end-to-end suites |
+| `tests/policy-conformance/` | Policy backend conformance through production networking paths |
 | `tests/suites/` | End-to-end suites, grouped by test family |
 | `tests/tmachine/` | QEMU test machines provisioned with Ansible, and the `Session` API that drives them |
 | `tests/runner/` | `openshell-test-runner`: builds a test family for tmachine guests, runs it in a tmachine environment and checks the results |

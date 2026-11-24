@@ -506,7 +506,14 @@ fn main() -> Result<()> {
             .into_diagnostic()?;
         return runtime.block_on(async move {
             openshell_crypto::tls::ensure_default_provider();
-            let exit = openshell_supervisor_process::debug_rpc::run(&raw_args[2..]).await?;
+            let exit = openshell_supervisor_process::debug_rpc::run(
+                &raw_args[2..],
+                openshell_core::extension_protocol::capabilities_if(
+                    openshell_core::extension_protocol::POLICY_CEDAR_V1,
+                    cfg!(feature = "experimental"),
+                ),
+            )
+            .await?;
             std::process::exit(exit);
         });
     }
@@ -768,7 +775,7 @@ fn main() -> Result<()> {
                         "network-proxy role started without validated policy files"
                     ));
                 };
-                openshell_supervisor::run_network_proxy(
+                Box::pin(openshell_supervisor::run_network_proxy(
                     listen,
                     policy_rules,
                     policy_data,
@@ -776,7 +783,7 @@ fn main() -> Result<()> {
                     upstream_proxy_args,
                     args.additional_ca_bundle,
                     args.nat64_prefixes,
-                )
+                ))
                 .await
             }
         }
@@ -1397,7 +1404,7 @@ mod tests {
         );
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("backends.json");
-        std::fs::write(&path, r#"{"backends":[{"name":"external","endpoint":{"kind":"unix","socket_path":"/trusted/backend.sock"}}]}"#).unwrap();
+        std::fs::write(&path, r#"{"backends":[{"name":"external","endpoint":{"kind":"tcp","authority":"backend.example:443","addresses":["127.0.0.1:47000"]}}]}"#).unwrap();
         let args = Args::try_parse_from([
             "openshell-supervisor",
             "--isolation-backends-file",
