@@ -239,6 +239,7 @@ program for the conformance suite; see
 | `list [FILTER]...` | Prints each test's name and description. Ignored tests are included and marked. |
 | `ready [--timeout SECS]` | Waits for the gateway, like `testkit-ready` (default 60 seconds). Exits 2 if it is not ready in time. |
 | `run [FILTER]...` | Runs the tests one at a time, each in its own process. Unix only. |
+| `nextest-metadata DIR` | Writes a stub manifest and JSON metadata describing the prebuilt executable. |
 
 A filter selects tests whose name contains it. `run` also takes:
 
@@ -267,6 +268,19 @@ Without a subcommand, the program takes libtest's arguments instead. A
 test target with `harness = false` therefore also runs under `cargo test`
 and nextest. In that mode tests run in one process, one at a time unless
 `--test-threads` says otherwise.
+
+To run a prebuilt program with nextest (no Cargo or checkout required), write
+metadata to a fresh directory on the machine where the program will run:
+
+```shell
+openshell-conformance nextest-metadata metadata
+cargo-nextest nextest run --cargo-metadata metadata/cargo-metadata.json \
+  --binaries-metadata metadata/binaries-metadata.json --test-threads 4
+```
+
+The metadata refers to the binary's absolute path. Regenerate it if the
+binary moves. Tests run from the metadata directory, so give paths such as
+`OPENSHELL_BIN` as absolute paths.
 
 A test's name is its module path without the crate name, then its function
 name, as in nextest. Its family, which groups tests in the JUnit report, is

@@ -60,9 +60,9 @@ e2e_openshell_conformance_bin() {
   echo "${program}"
 }
 
-# Run the conformance suite with openshell-conformance. The JUnit report goes
+# Run the conformance suite with nextest. The JUnit report goes
 # to OPENSHELL_CONFORMANCE_JUNIT, else results/conformance-<gateway>.xml.
-e2e_run_openshell_conformance() {
+e2e_run_openshell_conformance() (
   local gateway_label=${1:-OpenShell}
   local root program junit
   root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -84,8 +84,21 @@ e2e_run_openshell_conformance() {
   # these for the gateway they started.
   echo "==> Running conformance suites against the ${gateway_label} gateway"
   "${program}" ready || return
-  "${program}" run --junit "${junit}"
-}
+  local work status=0
+  work="$(mktemp -d)" || return
+  trap 'rm -rf "${work}"' EXIT
+  "${program}" nextest-metadata "${work}" || return
+  # The profile the runner also uses for prebuilt programs.
+  cargo-nextest nextest run \
+    --cargo-metadata "${work}/cargo-metadata.json" \
+    --binaries-metadata "${work}/binaries-metadata.json" \
+    --config-file "${root}/tests/runner/src/program-nextest.toml" \
+    --profile openshell --no-tests fail || status=$?
+  if [[ -f "${work}/target/nextest/openshell/junit.xml" ]]; then
+    mv "${work}/target/nextest/openshell/junit.xml" "${junit}" || return
+  fi
+  return "${status}"
+)
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   e2e_run_openshell_conformance
