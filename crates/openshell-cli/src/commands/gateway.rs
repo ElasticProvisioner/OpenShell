@@ -1247,18 +1247,9 @@ pub async fn gateway_login(name: &str, gateway_insecure: bool) -> Result<()> {
                 .await?
             };
 
-            let username = jwt_preferred_username(&bundle.access_token);
             openshell_bootstrap::oidc_token::store_oidc_token(name, &bundle)?;
             openshell_bootstrap::oidc_token::clear_oidc_login_prompt(name)?;
-
-            if let Some(user) = username {
-                eprintln!(
-                    "{} Authenticated to gateway '{name}' as {user}",
-                    "✓".green().bold(),
-                );
-            } else {
-                eprintln!("{} Authenticated to gateway '{name}'", "✓".green().bold());
-            }
+            eprintln!("{} Authenticated to gateway '{name}'", "✓".green().bold());
         }
         _ => {
             return Err(miette::miette!(
@@ -1269,18 +1260,6 @@ pub async fn gateway_login(name: &str, gateway_insecure: bool) -> Result<()> {
     }
 
     Ok(())
-}
-
-/// Extract `preferred_username` from a JWT payload without signature verification.
-fn jwt_preferred_username(token: &str) -> Option<String> {
-    let payload = token.split('.').nth(1)?;
-    let decoded =
-        base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, payload).ok()?;
-    let claims: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
-    claims
-        .get("preferred_username")
-        .and_then(|v| v.as_str())
-        .map(String::from)
 }
 
 /// Clear stored authentication credentials for a gateway.
