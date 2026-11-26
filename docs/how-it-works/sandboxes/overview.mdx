@@ -919,6 +919,7 @@ openshell sandbox ssh-config my-sandbox
 ```
 
 Append the output to `~/.ssh/config` or use `--editor` on `sandbox create`/`sandbox connect` for automatic setup.
+If the gateway URL contains credentials, a path, a query, or a fragment, register it under a gateway name and use that name when generating the SSH config.
 
 ## Transfer Files
 
