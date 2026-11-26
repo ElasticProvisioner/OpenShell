@@ -197,7 +197,7 @@ echo 'eval "$(~/.local/bin/mise activate zsh)"' >> ~/.zshrc
 
 Linux/macOS development requirements:
 
-- Rust 1.94+
+- Rust 1.95+
 - Python 3.11+
 - Docker (running)
 
