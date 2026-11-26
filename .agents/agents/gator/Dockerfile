@@ -9,7 +9,7 @@
 # tooling, but keeps the initial agent surface focused on Codex + GitHub tooling
 # for the gator-gate workflow.
 
-FROM nvcr.io/nvidia/base/ubuntu:noble-20251013 AS system
+FROM nvcr.io/nvidia/base/ubuntu:noble-20261110.1 AS system
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \

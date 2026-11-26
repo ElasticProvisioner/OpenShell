@@ -20,7 +20,7 @@ const SANDBOX_CREATE_TIMEOUT: Duration = Duration::from_mins(10);
 const CDI_GPU_DEVICE_ALL: &str = "nvidia.com/gpu=all";
 const CDI_GPU_DEVICE_PREFIX: &str = "nvidia.com/gpu=";
 const GPU_PROBE_IMAGE_ENV: &str = "OPENSHELL_E2E_GPU_PROBE_IMAGE";
-const DEFAULT_GPU_PROBE_IMAGE: &str = "nvcr.io/nvidia/base/ubuntu:noble-20251013";
+const DEFAULT_GPU_PROBE_IMAGE: &str = "nvcr.io/nvidia/base/ubuntu:noble-20261110.1";
 
 fn gpu_lines(output: &str) -> Vec<String> {
     strip_ansi(output)
