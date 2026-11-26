@@ -1,0 +1,103 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: Publish Test Inputs
+
+# Copies the test inputs this run built to an immutable OCI artifact keyed by
+# source revision, so downstream repositories can reuse them after Actions
+# artifacts expire and without knowing which run produced them:
+#
+#   oras pull ghcr.io/ai-openshell/openshell/test-inputs:<full-sha>
+#
+# The caller must have uploaded openshell-tmachine-inputs and
+# openshell-conformance-<triple> (see build-conformance.yml) in this run. Only
+# call it where the token can write packages: not for fork pull requests.
+on:
+  workflow_call:
+    inputs:
+      source-sha:
+        description: Full revision the inputs were built from
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: Publish test inputs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      SOURCE_SHA: ${{ inputs['source-sha'] }}
+    steps:
+      - name: Download tmachine inputs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: openshell-tmachine-inputs
+          path: bundle/tmachine-inputs
+          github-token: ${{ github.token }}
+
+      # Each pattern keeps one directory per artifact (no merge) so names stay
+      # visible in the bundle. macOS artifacts are not part of the bundle.
+      - name: Download conformance program
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: openshell-conformance-*-linux-musl
+          path: bundle/conformance
+          github-token: ${{ github.token }}
+
+      - name: Download supervisor, sandbox and guest init
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: openshell-{supervisor,sandbox,vm-init}-*-unknown-linux-*
+          path: bundle/runtime
+          github-token: ${{ github.token }}
+
+      - name: Download compute drivers
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: openshell-driver-*-unknown-linux-gnu
+          path: bundle/drivers
+          github-token: ${{ github.token }}
+
+      - name: Install ORAS
+        uses: oras-project/setup-oras@1d808f7d7f6995cc68b7bf507bfe5c5446e1dc9d # v2.0.0
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+
+      - name: Publish
+        run: |
+          set -euo pipefail
+          mkdir -p bundle/conformance bundle/runtime bundle/drivers
+          ref="ghcr.io/ai-openshell/openshell/test-inputs:${SOURCE_SHA}"
+
+          # Tags are immutable by convention: a re-run, or a second workflow
+          # building the same revision, keeps the first publication.
+          if oras manifest fetch "${ref}" >/dev/null 2>&1; then
+            echo "${ref} already exists; keeping it." | tee -a "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+
+          (cd bundle && find . -type f -print0 | sort -z | xargs -0 sha256sum > ../SHA256SUMS)
+          mv SHA256SUMS bundle/SHA256SUMS
+
+          cd bundle
+          oras push "${ref}" \
+            --artifact-type application/vnd.nvidia.openshell.test-inputs.v1 \
+            --annotation "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --annotation "org.opencontainers.image.revision=${SOURCE_SHA}" \
+            --annotation "org.opencontainers.image.description=OpenShell test inputs for ${SOURCE_SHA}" \
+            --annotation "com.nvidia.openshell.workflow-run=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            SHA256SUMS tmachine-inputs conformance runtime drivers
+
+          {
+            echo "### Test inputs for \`${SOURCE_SHA}\`"
+            echo
+            echo "\`oras pull ${ref}\`"
+            echo
+            echo "Layers: \`tmachine-inputs\`, \`conformance\`, \`runtime\` (supervisor, sandbox, vm-init), \`drivers\`, \`SHA256SUMS\`."
+          } >> "${GITHUB_STEP_SUMMARY}"

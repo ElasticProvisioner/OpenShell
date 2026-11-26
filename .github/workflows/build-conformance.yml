@@ -1,0 +1,67 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: Build Conformance Program
+
+# The static openshell-conformance program, built once per architecture and
+# uploaded as openshell-conformance-<triple>. It lives in its own workspace and
+# is not released, so build-binaries-linux.yml does not build it.
+on:
+  workflow_call:
+    inputs:
+      checkout-ref:
+        required: true
+        type: string
+    secrets:
+      CACHIX_AUTH_TOKEN:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: openshell-conformance (${{ matrix.triple }})
+    strategy:
+      matrix:
+        include:
+          - triple: x86_64-unknown-linux-musl
+            runner: ubuntu-24.04
+          - triple: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.checkout-ref }}
+      - uses: ./.github/actions/setup-nix
+        with:
+          prepare-shell: "true"
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: binaries-v2-openshell-conformance-${{ matrix.triple }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+      - name: Build openshell-conformance
+        shell: nix develop -c bash -euo pipefail {0}
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target
+          TRIPLE: ${{ matrix.triple }}
+        run: |
+          cargo build --release --locked --target "$TRIPLE" \
+            --manifest-path tests/suites/conformance/Cargo.toml \
+            --bin openshell-conformance
+          binary="target/$TRIPLE/release/openshell-conformance"
+          # The program must run on any lane host.
+          tasks/scripts/verify-static-binary.sh "$binary"
+          # Fails if the program has no tests linked.
+          "$binary" list
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: openshell-conformance-${{ matrix.triple }}
+          path: target/${{ matrix.triple }}/release/openshell-conformance
+          compression-level: 0
+          retention-days: 5
+          if-no-files-found: error
