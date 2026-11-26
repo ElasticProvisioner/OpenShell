@@ -8,6 +8,50 @@ For local test commands see [TESTING.md](TESTING.md). For PR conventions see [CO
 
 PR CI runs on standard GitHub-hosted runners. `Branch Checks` and `Helm Lint` trigger on `pull_request` and `merge_group`. Workflow runs from outside contributors wait for a maintainer to approve them in the Actions tab.
 
+CI implements the testing layers defined in `TESTING.md` through separate
+workflow families:
+
+| Testing responsibility | Current CI implementation |
+|---|---|
+| Static, build, unit, component, and SDK checks | `Branch Checks` across Linux x86_64, Linux ARM64, and macOS ARM64, with additional language-specific jobs |
+| Runtime and cross-component validation | Label-selected `Branch E2E Checks` for Docker, Podman, Kubernetes, VM, GPU, MCP, Python, and managed or standalone drivers |
+| Nix and `tmachine` validation | Release Dev builds exact-revision artifacts and test archives, then runs CLI conformance in disposable Ubuntu/Docker and Fedora/Podman guests |
+| Windows compatibility | Opt-in Windows MSVC x64 and ARM64 jobs; main and manual runs also build release binaries |
+| Integrated revision validation | Required statuses on merge-group SHAs before `main` advances |
+| Published artifact validation | Release workflows and post-publish release canaries |
+| Security analysis | Required dependency and deployment gates plus informational reports described below |
+
+This is not yet the full target state. The project is migrating integration and
+Linux installation testing from `mise` tasks and workflow-local shell harnesses
+to Nix-built artifacts and `tmachine` wherever the runner can represent the
+environment. Today that path is limited to release conformance. `TESTING.md`
+defines the desired gates, matrices, migration phases, and deferred decisions.
+This document should describe a migration step as complete only after the
+workflow enforces it.
+
+### Current tmachine implementation
+
+`.github/workflows/conformance.yml` is the first implementation of this model.
+It downloads exact-revision binaries and OCI image artifacts, uses
+`nix run .#build-artifacts-test-archives` to package the test suite, and fans out
+`nix run .#tmachine -- test <scenario> <testsuite>` on KVM-enabled runners. The
+workflow caches prepared disks, while `tmachine` gives each test a fresh writable
+overlay. Release Dev currently calls the reusable workflow for these pairs:
+
+| Scenario | Testsuite |
+|---|---|
+| `ubuntu-docker-rootful` | `conformance` |
+| `fedora-podman-rootful` | `conformance` |
+| `fedora-podman-rootless` | `conformance` |
+
+This workflow currently runs from Release Dev. It is not a required pull-request
+or merge-queue gate. Branch E2E, GPU, Kubernetes, VM, Windows, and release-canary
+workflows continue to provide the coverage that has not migrated to tmachine.
+
+The desired merge matrix, release-validation model, and migration sequence are
+defined in [TESTING.md](TESTING.md). They describe target behavior and do not
+become current CI behavior until the corresponding workflows implement them.
+
 `pull_request` runs from forks get a read-only token and no secrets, so they cannot post statuses. `Required CI Gates` runs from the base repository (`pull_request_target` and `workflow_run`), never checks out PR code, and posts the required `OpenShell / ...` statuses on the PR head SHA. E2E suites are opt-in because they are more expensive.
 
 Merge queue validation is a second integration gate for `main`. After a PR has passed the required PR-head statuses, a maintainer adds it to the merge queue. GitHub creates a temporary merge-group branch that combines the latest `main`, the queued PR, and any earlier queued PRs. The same required `OpenShell / ...` status contexts are then published against the merge-group SHA before GitHub merges it.
