@@ -585,6 +585,15 @@ kubectl -n openshell logs <gateway-pod> -c openshell-gateway --tail=200
 `server.telemetryEnabled` renders `OPENSHELL_TELEMETRY_ENABLED` on the gateway
 pod, and the gateway propagates the effective value to sandbox supervisors.
 
+The Helm gateway container defaults to a read-only root filesystem. For
+`Read-only file system` errors, check that writes target the writable `/tmp`,
+`/var/lib/openshell-state`, or StatefulSet `/var/openshell` mounts. The chart adds
+a `gateway-tmp` emptyDir at `/tmp` unless `server.extraVolumeMounts` already mounts
+that path; the default optional OCSF log uses `/tmp/gateway-ocsf.jsonl`. Custom
+output paths need writable mounts through `server.extraVolumes` and
+`server.extraVolumeMounts`. Inspect `securityContext.readOnlyRootFilesystem` if
+an operator explicitly opted out.
+
 Gateway pod scheduling accepts top-level `nodeSelector`, `affinity`,
 `tolerations`, `priorityClassName`, and `topologySpreadConstraints` values for
 both StatefulSet and Deployment workloads. The last two default to unset.

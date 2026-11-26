@@ -561,6 +561,12 @@ carrying the same rules as the chart's `openshell-sandbox` Role.
 
 The gateway workload and the PKI bootstrap hooks satisfy the [Restricted Pod Security Standard](https://kubernetes.io/docs/concepts/security/pod-security-standards/), so the release installs into a namespace labeled `pod-security.kubernetes.io/enforce=restricted`.
 
+The gateway container uses a read-only root filesystem by default. The chart
+provides writable volumes for `/tmp`, gateway state, and the StatefulSet's database.
+For custom file output paths, add writable mounts with `server.extraVolumes` and
+`server.extraVolumeMounts`. An extra mount at `/tmp` replaces the chart's temporary
+volume. Set `securityContext.readOnlyRootFilesystem=false` to opt out.
+
 ## Probes
 
 The gateway exposes `/healthz` for process liveness and `/readyz` for dependency-aware readiness on the health port. The Helm chart wires both into Kubernetes probes:

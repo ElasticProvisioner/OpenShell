@@ -5,6 +5,7 @@ suite: gateway pod securityContext
 templates:
   - templates/gateway-config.yaml
   - templates/statefulset.yaml
+  - templates/deployment.yaml
 release:
   name: openshell
   namespace: my-namespace
@@ -43,6 +44,143 @@ tests:
           path: spec.template.spec.containers[0].securityContext.capabilities.drop
           value:
             - ALL
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: gateway-tmp
+            mountPath: /tmp
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: gateway-tmp
+            emptyDir: {}
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: openshell-data
+            mountPath: /var/openshell
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: gateway-state
+            mountPath: /var/lib/openshell-state
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: gateway-state
+            emptyDir: {}
+
+  - it: keeps a Deployment root read-only with writable temporary and state volumes
+    template: templates/deployment.yaml
+    set:
+      workload.kind: deployment
+      server.externalDbSecret: my-pg-secret
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: gateway-tmp
+            mountPath: /tmp
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: gateway-tmp
+            emptyDir: {}
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: gateway-state
+            mountPath: /var/lib/openshell-state
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: gateway-state
+            emptyDir: {}
+
+  - it: allows an operator to opt out of a read-only root filesystem
+    template: templates/statefulset.yaml
+    set:
+      securityContext.readOnlyRootFilesystem: false
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: false
+
+  - it: preserves an operator-supplied temporary volume without duplicate mounts
+    template: templates/statefulset.yaml
+    set:
+      server.extraVolumes:
+        - name: custom-tmp
+          emptyDir:
+            medium: Memory
+      server.extraVolumeMounts:
+        - name: custom-tmp
+          mountPath: /tmp
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].volumeMounts[?(@.mountPath == "/tmp")].name
+          value: custom-tmp
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: custom-tmp
+            emptyDir:
+              medium: Memory
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: gateway-tmp
+            emptyDir: {}
+
+  - it: preserves Deployment temporary volume overrides
+    template: templates/deployment.yaml
+    set:
+      workload.kind: deployment
+      server.externalDbSecret: my-pg-secret
+      securityContext.readOnlyRootFilesystem: false
+      server.extraVolumes:
+        - name: custom-tmp
+          emptyDir: {}
+      server.extraVolumeMounts:
+        - name: custom-tmp
+          mountPath: /tmp
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: false
+      - equal:
+          path: spec.template.spec.containers[0].volumeMounts[?(@.mountPath == "/tmp")].name
+          value: custom-tmp
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: gateway-tmp
+            emptyDir: {}
+
+  - it: retains writable temporary storage with OpenShift-assigned identities
+    template: templates/statefulset.yaml
+    set:
+      securityContext.runAsUser: null
+      podSecurityContext.fsGroup: null
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[0].securityContext.runAsUser
+      - notExists:
+          path: spec.template.spec.securityContext.fsGroup
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: gateway-tmp
+            emptyDir: {}
 
   - it: omits the pod securityContext block when podSecurityContext is null
     template: templates/statefulset.yaml

@@ -728,6 +728,7 @@ for peer identity policies, multi-node registrations, and authorization.
 | sandboxServiceAccount.name | string | `""` | Existing service account name for sandbox pods when sandboxServiceAccount.create is false. |
 | securityContext.allowPrivilegeEscalation | bool | `false` | Whether the gateway container can gain additional privileges. |
 | securityContext.capabilities.drop | list | `["ALL"]` | Linux capabilities dropped from the gateway container. |
+| securityContext.readOnlyRootFilesystem | bool | `true` | Mount the gateway container root filesystem read-only. Mount additional writable paths with server.extraVolumes and server.extraVolumeMounts. |
 | securityContext.runAsNonRoot | bool | `true` | Require the gateway container to run as a non-root user. |
 | securityContext.runAsUser | int | `1000` | UID assigned to the gateway container. |
 | securityContext.seccompProfile.type | string | `"RuntimeDefault"` | Seccomp profile applied to the gateway container. |

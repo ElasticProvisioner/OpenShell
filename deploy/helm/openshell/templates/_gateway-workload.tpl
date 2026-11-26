@@ -19,6 +19,10 @@ Gateway pod template shared by the StatefulSet and Deployment workload shapes.
 {{- $legacyVaultResources := get $legacyCredentialDrivers "vault" | default dict -}}
 {{- $vaultCaConfigMapName := get $vaultResources "caConfigMapName" | default (get $legacyVaultResources "caConfigMapName") -}}
 {{- $supervisorNetwork := .Values.supervisor.network | default dict -}}
+{{- $hasTmpMount := false -}}
+{{- range .Values.server.extraVolumeMounts -}}
+{{- if eq .mountPath "/tmp" -}}{{- $hasTmpMount = true -}}{{- end -}}
+{{- end -}}
 metadata:
   annotations:
     # Roll the gateway workload when the rendered gateway TOML changes - the
@@ -225,6 +229,10 @@ spec:
         {{- end }}
         - name: gateway-state
           mountPath: /var/lib/openshell-state
+        {{- if not $hasTmpMount }}
+        - name: gateway-tmp
+          mountPath: /tmp
+        {{- end }}
       ports:
         - name: grpc
           containerPort: {{ .Values.service.port }}
@@ -356,6 +364,10 @@ spec:
     {{- end }}
     - name: gateway-state
       emptyDir: {}
+    {{- if not $hasTmpMount }}
+    - name: gateway-tmp
+      emptyDir: {}
+    {{- end }}
   {{- with .Values.priorityClassName }}
   priorityClassName: {{ . }}
   {{- end }}

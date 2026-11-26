@@ -275,6 +275,9 @@ podSecurityContext:
   fsGroup: 1000
 
 securityContext:
+  # -- Mount the gateway container root filesystem read-only. Mount additional
+  # writable paths with server.extraVolumes and server.extraVolumeMounts.
+  readOnlyRootFilesystem: true
   # -- Require the gateway container to run as a non-root user.
   runAsNonRoot: true
   # -- UID assigned to the gateway container.
