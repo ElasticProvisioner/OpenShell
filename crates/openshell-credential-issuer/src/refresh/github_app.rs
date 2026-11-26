@@ -206,9 +206,11 @@ pub(super) async fn mint(state: &MintRequest) -> Result<MintedCredential, Refres
     if token.token.is_empty() || !token.token.bytes().all(|byte| byte.is_ascii_graphic()) {
         return Err(invalid_response());
     }
-    let expires_at_ms = chrono::DateTime::parse_from_rfc3339(&token.expires_at)
+    let expires_at_ms = token
+        .expires_at
+        .parse::<jiff::Timestamp>()
         .map_err(|_| invalid_response())?
-        .timestamp_millis();
+        .as_millisecond();
     let now_ms = current_time_ms();
     if expires_at_ms <= now_ms {
         return Err(invalid_response());
@@ -491,7 +493,7 @@ mod tests {
     #[tokio::test]
     async fn github_app_mints_scoped_token_with_verified_app_jwt() {
         let server = MockServer::start().await;
-        let expiry = chrono::Utc::now() + chrono::Duration::minutes(30);
+        let expiry = jiff::Timestamp::now() + jiff::SignedDuration::from_mins(30);
         let token = format!("ghs_123_{}", "opaque".repeat(100));
         Mock::given(method("POST"))
             .and(path("/app/installations/123/access_tokens"))
@@ -501,7 +503,7 @@ mod tests {
                 serde_json::json!({"repository_ids": [42,43], "permissions": {"contents":"read"}}),
             ))
             .respond_with(ResponseTemplate::new(201).set_body_json(
-                serde_json::json!({"token": token, "expires_at": expiry.to_rfc3339()}),
+                serde_json::json!({"token": token, "expires_at": expiry.to_string()}),
             ))
             .expect(1)
             .mount(&server)
@@ -509,7 +511,7 @@ mod tests {
         let before = current_time_ms() / 1000;
         let minted = mint(&state(&server.uri())).await.unwrap();
         assert_eq!(minted.access_token, token);
-        assert_eq!(minted.expires_at_ms, expiry.timestamp_millis());
+        assert_eq!(minted.expires_at_ms, expiry.as_millisecond());
         assert!(minted.refresh_token.is_none());
         assert!(minted.additional_credentials.is_empty());
         let requests = server.received_requests().await.unwrap();
@@ -575,7 +577,7 @@ mod tests {
     #[tokio::test]
     async fn github_app_mints_using_enterprise_default_api_version() {
         let server = MockServer::start().await;
-        let expiry = chrono::Utc::now() + chrono::Duration::minutes(30);
+        let expiry = jiff::Timestamp::now() + jiff::SignedDuration::from_mins(30);
         Mock::given(method("POST"))
             .and(path("/api/v3/app/installations/123/access_tokens"))
             .respond_with(move |request: &wiremock::Request| {
@@ -589,7 +591,7 @@ mod tests {
                     );
                 }
                 ResponseTemplate::new(201).set_body_json(
-                    serde_json::json!({"token": "enterprise-token", "expires_at": expiry.to_rfc3339()}),
+                    serde_json::json!({"token": "enterprise-token", "expires_at": expiry.to_string()}),
                 )
             })
             .expect(1)
@@ -599,7 +601,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(minted.access_token, "enterprise-token");
-        assert_eq!(minted.expires_at_ms, expiry.timestamp_millis());
+        assert_eq!(minted.expires_at_ms, expiry.as_millisecond());
         let requests = server.received_requests().await.unwrap();
         assert!(!requests[0].headers.contains_key("x-github-api-version"));
     }

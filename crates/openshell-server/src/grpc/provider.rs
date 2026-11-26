@@ -9437,7 +9437,7 @@ pub(super) mod tests {
             .and(path("/app/installations/123/access_tokens"))
             .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
                 "token": "installation-token",
-                "expires_at": (chrono::Utc::now() + chrono::Duration::minutes(30)).to_rfc3339()
+                "expires_at": (jiff::Timestamp::now() + jiff::SignedDuration::from_mins(30)).to_string()
             })))
             .expect(1)
             .mount(&server)
@@ -9502,7 +9502,7 @@ pub(super) mod tests {
                 .and(path("/app/installations/123/access_tokens"))
                 .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
                     "token": "installation-token",
-                    "expires_at": (chrono::Utc::now() + chrono::Duration::minutes(30)).to_rfc3339()
+                    "expires_at": (jiff::Timestamp::now() + jiff::SignedDuration::from_mins(30)).to_string()
                 })))
                 .expect(1)
                 .mount(&server)
@@ -9607,7 +9607,7 @@ pub(super) mod tests {
         Mock::given(method("POST"))
             .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
                 "token": "installation-token",
-                "expires_at": (chrono::Utc::now() + chrono::Duration::minutes(30)).to_rfc3339(),
+                "expires_at": (jiff::Timestamp::now() + jiff::SignedDuration::from_mins(30)).to_string(),
             })))
             .expect(1)
             .mount(server)
@@ -10055,7 +10055,7 @@ pub(super) mod tests {
                 .and(path("/app/installations/123/access_tokens"))
                 .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
                     "token": token,
-                    "expires_at": (chrono::Utc::now() + chrono::Duration::minutes(30)).to_rfc3339()
+                    "expires_at": (jiff::Timestamp::now() + jiff::SignedDuration::from_mins(30)).to_string()
                 })))
                 .expect(1)
                 .mount(&server)

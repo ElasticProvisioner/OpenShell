@@ -1033,7 +1033,7 @@ enum ProviderCommands {
         #[arg(long = "config", value_name = "KEY=VALUE")]
         config: Vec<String>,
 
-        /// Credential expiry (`KEY=TIMESTAMP`). Accepts epoch milliseconds or RFC3339. A zero timestamp clears expiry.
+        /// Credential expiry (`KEY=TIMESTAMP`). Accepts epoch milliseconds, RFC3339, or ISO 8601 with a UTC offset. A zero timestamp clears expiry.
         #[arg(long = "credential-expires-at", value_name = "KEY=TIMESTAMP")]
         credential_expires_at: Vec<String>,
 
@@ -1097,7 +1097,7 @@ enum ProviderRefreshCommands {
         #[arg(long = "material-secret", value_name = "KEY=SECRET")]
         material_secrets: Vec<String>,
 
-        /// Expiry for the current credential. Accepts epoch milliseconds or RFC3339.
+        /// Expiry for the current credential. Accepts epoch milliseconds, RFC3339, or ISO 8601 with a UTC offset.
         #[arg(
             long = "credential-expires-at",
             value_name = "TIMESTAMP",

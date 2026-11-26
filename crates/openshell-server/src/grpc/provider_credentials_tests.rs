@@ -126,7 +126,7 @@ async fn github_app_delivery_caps_legacy_provider_expiry() {
     Mock::given(method("POST"))
         .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
             "token": "minted-token",
-            "expires_at": (chrono::Utc::now() + chrono::Duration::minutes(30)).to_rfc3339(),
+            "expires_at": (jiff::Timestamp::now() + jiff::SignedDuration::from_mins(30)).to_string(),
         })))
         .expect(1)
         .mount(&server)
@@ -206,7 +206,7 @@ async fn github_app_scope_reduction_withholds_token_and_respects_retry_after() {
     handle_configure_provider_refresh(&state, authed_request(config.clone()))
         .await
         .unwrap();
-    let expiry = (chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339();
+    let expiry = (jiff::Timestamp::now() + jiff::SignedDuration::from_hours(1)).to_string();
     Mock::given(method("POST"))
         .and(body_json(
             serde_json::json!({"repository_ids": [42,43], "permissions": {"contents":"read"}}),
