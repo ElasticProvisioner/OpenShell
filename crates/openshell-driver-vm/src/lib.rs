@@ -36,6 +36,8 @@ pub mod procguard;
 mod rootfs;
 #[cfg(feature = "compute-driver")]
 mod runtime;
+#[cfg(feature = "compute-driver")]
+pub mod settings;
 
 #[cfg(feature = "compute-driver")]
 pub use driver::{VmDriver, VmDriverConfig};

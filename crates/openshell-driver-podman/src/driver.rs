@@ -445,6 +445,13 @@ pub fn is_available() -> bool {
     detect_socket().is_some()
 }
 
+/// Check that Podman is reachable with `config`: resolve the socket, honouring
+/// `socket_path` and `OPENSHELL_PODMAN_SOCKET`, and ping it. Creates nothing.
+pub async fn check_backend(config: &PodmanComputeConfig) -> Result<(), PodmanApiError> {
+    let socket_path = resolve_socket_path(config.socket_path.clone(), detect_socket)?;
+    PodmanClient::new(socket_path).ping().await
+}
+
 /// Resolve the socket to connect to: explicit configuration wins, otherwise
 /// fall back to `detect`. Returns an error if neither resolves.
 ///

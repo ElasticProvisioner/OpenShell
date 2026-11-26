@@ -54,8 +54,9 @@ pub use correlation::current_ocsf_trace_correlation;
 
 #[cfg(feature = "export")]
 pub use driver::{
-    BoxGrpcStream, ComputeDriverTracing, DriverTracingConfig, DriverTracingHandle,
-    IN_PROCESS_COMPUTE_DRIVER_TARGET, InProcessRpcTracer, install_driver_tracing,
+    BoxGrpcStream, ComputeDriverTracing, DeferredDriverTracing, DeferredExportConfig,
+    DriverTracingConfig, DriverTracingHandle, IN_PROCESS_COMPUTE_DRIVER_TARGET, InProcessRpcTracer,
+    install_deferred_driver_tracing, install_driver_tracing,
 };
 #[cfg(feature = "export")]
 pub use grpc::{

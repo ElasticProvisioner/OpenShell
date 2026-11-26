@@ -18,6 +18,7 @@ path = "src/main.rs"
 openshell-core = { path = "../openshell-core", default-features = false, features = ["driver-extraction", "otel", "clap"] }
 openshell-isolation-interface = { path = "../openshell-isolation-interface" }
 openshell-sandbox-backend = { path = "../openshell-sandbox-backend" }
+openshell-driver-sdk = { path = "../openshell-driver-sdk" }
 openshell-otel = { path = "../openshell-otel" }
 
 opentelemetry = { workspace = true }
@@ -48,6 +49,8 @@ tar = "0.4"
 tempfile = "3"
 
 [dev-dependencies]
+hyper-util = { workspace = true }
+tower = { workspace = true }
 openshell-otel-test-support = { path = "../openshell-otel-test-support" }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true, features = ["testing"] }

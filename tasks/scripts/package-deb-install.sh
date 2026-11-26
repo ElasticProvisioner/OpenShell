@@ -58,13 +58,17 @@ cargo build --release \
 	-p openshell-cli \
 	-p openshell-gateway \
 	-p openshell-prover-cli \
-	-p openshell-driver-vm
+	-p openshell-driver-vm \
+	-p openshell-driver-podman \
+	-p openshell-driver-docker
 
 echo "==> Building Debian package"
 OPENSHELL_CLI_BINARY="${repo_root}/target/release/openshell" \
 	OPENSHELL_GATEWAY_BINARY="${repo_root}/target/release/openshell-gateway" \
 	OPENSHELL_PROVER_BINARY="${repo_root}/target/release/openshell-prover" \
 	OPENSHELL_DRIVER_VM_BINARY="${repo_root}/target/release/openshell-driver-vm" \
+	OPENSHELL_DRIVER_PODMAN_BINARY="${repo_root}/target/release/openshell-driver-podman" \
+	OPENSHELL_DRIVER_DOCKER_BINARY="${repo_root}/target/release/openshell-driver-docker" \
 	OPENSHELL_DEB_VERSION="$VERSION" \
 	OPENSHELL_DEB_ARCH="$ARCH" \
 	OPENSHELL_OUTPUT_DIR="$OUTPUT_DIR" \

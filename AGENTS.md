@@ -52,12 +52,14 @@ Do not rely on this file for a full inventory. The detailed public and contribut
 | `crates/openshell-spiffe/` | SPIFFE identity types | Dependency-light SPIFFE ID mapping, claim parsing, and the sandbox identity provider interface |
 | `crates/openshell-spire/` | SPIRE adapter | Gateway-owned SPIFFE Broker API client that issues and verifies stable sandbox JWT-SVIDs |
 | `crates/openshell-tui/` | Terminal UI | Ratatui-based dashboard for monitoring |
+| `crates/openshell-driver-launch/` | Driver launch protocol | `DriverLaunch` `GetLaunchInfo`/`Configure` service and the `Deferred` wrapper for launched compute drivers |
+| `crates/openshell-driver-sdk/` | Launched-driver SDK | Stdin table reader, start-up exit codes, staged network-trust loader, telemetry and admission conversion, and gateway context |
 | `crates/openshell-driver-kubernetes-secrets/` | Kubernetes Secrets credential driver | In-process `CredentialDriver` backend for OpenShell-managed K8s Secret storage |
 | `crates/openshell-driver-vault/` | Vault credential driver | In-process `CredentialDriver` backend for Vault-compatible KV storage |
 | `crates/openshell-driver-db-credstore/` | Database credential driver | In-process `CredentialDriver` backend for gateway database credential storage |
 | `crates/openshell-driver-kubernetes/` | Kubernetes compute driver | In-process `ComputeDriver` backend for K8s sandbox pods |
-| `crates/openshell-driver-docker/` | Docker compute driver | In-process `ComputeDriver` backend for local Docker sandbox containers |
-| `crates/openshell-driver-podman/` | Podman compute driver | In-process `ComputeDriver` backend for local Podman sandbox containers |
+| `crates/openshell-driver-docker/` | Docker compute driver | Gateway-launched `ComputeDriver` subprocess for local Docker sandbox containers |
+| `crates/openshell-driver-podman/` | Podman compute driver | Gateway-launched `ComputeDriver` subprocess for local Podman sandbox containers |
 | `crates/openshell-driver-vm/` | VM compute driver | Standalone libkrun-backed `ComputeDriver` subprocess (embeds its own rootfs + runtime) |
 | [`crates/openshell-driver-mxc/`](https://github.com/ai-openshell/openshell/tree/windows/crates/openshell-driver-mxc) (`windows` branch) | Microsoft MXC compute driver | Native Windows ProcessContainer backend; see the Windows branch for the maintained implementation |
 | [`crates/openshell-mxc-boundary/`](https://github.com/ai-openshell/openshell/tree/windows/crates/openshell-mxc-boundary) (`windows` branch) | Windows sandbox boundary | Dedicated Windows workload boundary paired with the host supervisor |

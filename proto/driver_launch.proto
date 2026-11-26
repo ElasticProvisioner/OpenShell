@@ -1,0 +1,112 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package openshell.driver.launch.v1;
+
+// Private gateway-to-driver launch protocol.
+//
+// The gateway starts a compute driver with only bootstrap arguments and the
+// operator's driver table on stdin. Once the driver is serving on its private
+// socket, the gateway calls GetLaunchInfo and then Configure to deliver
+// gateway-owned metadata. Until Configure succeeds, every other service the
+// driver serves returns UNAVAILABLE.
+service DriverLaunch {
+  // Identify the driver and the protocol versions and features it supports.
+  // Answers before Configure.
+  rpc GetLaunchInfo(GetLaunchInfoRequest) returns (GetLaunchInfoResponse);
+
+  // Deliver gateway-owned metadata. Succeeds at most once. A call that fails
+  // leaves the driver running and unconfigured, so the protocol lets the
+  // gateway retry. The current gateway does not: a failed Configure fails the
+  // launch and stops the driver. A request is at most 1 MiB.
+  rpc Configure(ConfigureRequest) returns (ConfigureResponse);
+
+  // Release the driver: the gateway has finished with it. The driver answers,
+  // finishes the calls in flight and exits. Until it is released, or its
+  // gateway is gone, a driver defers a stop signal that reaches it from
+  // elsewhere, such as a service manager that signals every process of the
+  // gateway's unit. That keeps the gateway's own shutdown work, such as
+  // stopping sandboxes through the driver, able to finish first.
+  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
+}
+
+message GetLaunchInfoRequest {}
+
+message GetLaunchInfoResponse {
+  string driver_name = 1;
+  string driver_version = 2;
+  repeated uint32 protocol_versions = 3;
+  repeated string features = 4;
+}
+
+message ConfigureRequest {
+  uint32 protocol_version = 1;
+  // Features the gateway requires. The driver rejects any it does not know
+  // with FAILED_PRECONDITION.
+  repeated string required_features = 2;
+  GatewayContext gateway = 3;
+  // Unset means there is no trust bundle.
+  NetworkTrust network_trust = 4;
+  ImageOverrides image_overrides = 5;
+  Telemetry telemetry = 6;
+  // The resource admission policy: `allow_driver_config` and
+  // `resource_admission`, as the JSON of `DriverAdmissionConfig`. This is the
+  // value `GetCapabilities.resource_admission_policy` carries, without its
+  // `v1:` prefix: `protocol_version` already versions it. The gateway owns and
+  // validates it. The driver applies it until `ComputeDriver` reports resolved
+  // resource labels to the gateway. Empty means the defaults. A typed
+  // `resource_admission_policy` is reserved for a later protocol version.
+  string resource_admission_policy_json = 7;
+}
+
+message ConfigureResponse {}
+
+message ShutdownRequest {}
+
+message ShutdownResponse {}
+
+message GatewayContext {
+  uint32 gateway_port = 1;
+  string tls_ca_path = 2;
+  string gateway_name = 3;
+  // The gateway's listener, `ip:port`. Drivers that choose how sandboxes reach
+  // the gateway from its bind address, such as Docker, use it.
+  string bind_address = 4;
+}
+
+message NetworkTrust {
+  string artifact_path = 1;
+  string digest = 2;
+  uint32 certificate_count = 3;
+}
+
+// From OPENSHELL_SANDBOX_RUNTIME_IMAGE and OPENSHELL_SUPERVISOR_IMAGE.
+message ImageOverrides {
+  optional string sandbox_runtime_image = 1;
+  optional string supervisor_image = 2;
+}
+
+message Telemetry {
+  // The driver's own exporter and the supervisors.
+  OtlpExport traces = 1;
+  // Supervisors.
+  OtlpExport ocsf = 2;
+  // Supervisors.
+  OtlpExport agent = 3;
+  CollectorTls collector = 4;
+  // Secret, in OTEL_EXPORTER_OTLP_TRACES_HEADERS format.
+  string trace_headers = 5;
+}
+
+message OtlpExport {
+  string endpoint = 1;
+  string protocol = 2;
+}
+
+message CollectorTls {
+  string ca_file = 1;
+  string cert_file = 2;
+  string key_file = 3;
+}

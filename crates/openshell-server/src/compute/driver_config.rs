@@ -141,6 +141,30 @@ where
     driver_config_from_file(context.file, driver_name)
 }
 
+/// The selected driver's merged table as TOML text, for a driver that parses
+/// its own configuration. The gateway checks no field of it beyond the
+/// gateway-owned guest TLS paths.
+pub fn driver_table_from_context(
+    context: DriverStartupContext<'_>,
+    driver_name: &str,
+) -> Result<toml::map::Map<String, toml::Value>> {
+    let Some(file) = context.file else {
+        return Ok(toml::map::Map::new());
+    };
+    let merged = config_file::driver_table(
+        driver_name,
+        &file.openshell.gateway,
+        file.openshell.drivers.get(driver_name),
+    );
+    reject_driver_owned_guest_tls_fields(&merged)?;
+    match merged {
+        toml::Value::Table(table) => Ok(table),
+        _ => Err(Error::config(format!(
+            "invalid [openshell.drivers.{driver_name}] table"
+        ))),
+    }
+}
+
 fn driver_config_from_file<T>(
     file: Option<&config_file::ConfigFile>,
     driver_name: &str,

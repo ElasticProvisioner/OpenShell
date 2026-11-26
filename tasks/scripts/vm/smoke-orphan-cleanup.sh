@@ -58,11 +58,11 @@ version = 2
 
 [openshell.gateway]
 compute_driver = "vm"
+driver_dir = "$ROOT/target/debug"
 disable_tls = true
 
 [openshell.drivers.vm]
 grpc_endpoint = "http://host.containers.internal:$PORT"
-driver_dir = "$ROOT/target/debug"
 state_dir = "$STATE_DIR"
 EOF
     OPENSHELL_SERVER_PORT="$PORT" \

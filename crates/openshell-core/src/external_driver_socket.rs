@@ -81,10 +81,12 @@ impl Drop for SocketCleanup {
     }
 }
 
-/// Incoming UDS connections restricted to the driver's effective UID.
+/// Incoming UDS connections restricted to the driver's effective UID and,
+/// when set, to one peer process.
 pub struct SameUidUnixIncoming {
     listener: UnixListener,
     expected_uid: u32,
+    expected_peer_pid: Option<u32>,
 }
 
 impl SameUidUnixIncoming {
@@ -93,8 +95,21 @@ impl SameUidUnixIncoming {
         Self {
             listener,
             expected_uid: rustix::process::geteuid().as_raw(),
+            expected_peer_pid: None,
         }
     }
+
+    /// Accept only connections from the process with this PID, as the VM
+    /// driver does for the gateway that launched it.
+    #[must_use]
+    pub fn expecting_peer_pid(mut self, pid: u32) -> Self {
+        self.expected_peer_pid = Some(pid);
+        self
+    }
+}
+
+fn peer_pid_matches(expected: Option<u32>, peer: Option<i32>) -> bool {
+    expected.is_none_or(|expected| peer.and_then(|pid| u32::try_from(pid).ok()) == Some(expected))
 }
 
 impl Stream for SameUidUnixIncoming {
@@ -105,12 +120,17 @@ impl Stream for SameUidUnixIncoming {
         loop {
             match this.listener.poll_accept(cx) {
                 Poll::Ready(Ok((stream, _))) => match stream.peer_cred() {
-                    Ok(credentials) if credentials.uid() == this.expected_uid => {
+                    Ok(credentials)
+                        if credentials.uid() == this.expected_uid
+                            && peer_pid_matches(this.expected_peer_pid, credentials.pid()) =>
+                    {
                         return Poll::Ready(Some(Ok(stream)));
                     }
                     Ok(credentials) => tracing::warn!(
                         peer_uid = credentials.uid(),
+                        peer_pid = credentials.pid(),
                         expected_uid = this.expected_uid,
+                        expected_peer_pid = this.expected_peer_pid,
                         "rejected external driver socket client"
                     ),
                     Err(err) => {
@@ -228,5 +248,49 @@ mod tests {
             rustix::process::geteuid().as_raw()
         );
         drop(client);
+    }
+
+    #[tokio::test]
+    async fn the_expected_peer_pid_is_accepted() {
+        let temp_dir = tempfile::tempdir().expect("create temporary directory");
+        let socket_path = temp_dir.path().join("compute.sock");
+        let listener = bind_private(&socket_path).expect("bind private socket");
+        let mut incoming =
+            SameUidUnixIncoming::new(listener).expecting_peer_pid(std::process::id());
+
+        let client = UnixStream::connect(&socket_path)
+            .await
+            .expect("connect to private socket");
+        incoming
+            .next()
+            .await
+            .expect("incoming stream ended")
+            .expect("accept the expected peer");
+        drop(client);
+    }
+
+    #[tokio::test]
+    async fn another_peer_pid_is_rejected() {
+        let temp_dir = tempfile::tempdir().expect("create temporary directory");
+        let socket_path = temp_dir.path().join("compute.sock");
+        let listener = bind_private(&socket_path).expect("bind private socket");
+        let mut incoming =
+            SameUidUnixIncoming::new(listener).expecting_peer_pid(std::process::id() + 1);
+
+        let client = UnixStream::connect(&socket_path)
+            .await
+            .expect("connect to private socket");
+        let accepted =
+            tokio::time::timeout(std::time::Duration::from_millis(200), incoming.next()).await;
+        assert!(accepted.is_err(), "a peer with another PID was accepted");
+        drop(client);
+    }
+
+    #[test]
+    fn peer_pid_matching() {
+        assert!(peer_pid_matches(None, None));
+        assert!(peer_pid_matches(Some(7), Some(7)));
+        assert!(!peer_pid_matches(Some(7), Some(8)));
+        assert!(!peer_pid_matches(Some(7), None));
     }
 }

@@ -9,6 +9,8 @@ use std::num::{NonZeroI64, NonZeroU64};
 use std::path::PathBuf;
 use tracing::info;
 
+mod serve;
+
 use openshell_core::proto::compute::v1::compute_driver_server::ComputeDriverServer;
 use openshell_core::sandbox_env::SupervisorOtlpArgs;
 use openshell_core::{AppArmorProfile, ImagePullPolicy, VERSION};
@@ -213,6 +215,9 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    if let Some(code) = serve::dispatch().await {
+        std::process::exit(code);
+    }
     let args = Args::parse();
     let _tracing = openshell_otel::install_driver_tracing(
         openshell_driver_podman::otel_tracing::TRACING,

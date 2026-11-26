@@ -13,6 +13,8 @@ use openshell_core::sandbox_env::SupervisorOtlpArgs;
 use openshell_driver_docker::{ComputeDriverService, DockerComputeConfig, DockerComputeDriver};
 use tracing::info;
 
+mod serve;
+
 #[derive(Debug, Parser)]
 #[command(name = "openshell-driver-docker", version = VERSION)]
 struct Args {
@@ -55,6 +57,9 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    if let Some(code) = serve::dispatch().await {
+        std::process::exit(code);
+    }
     let args = Args::parse();
     let _tracing = openshell_otel::install_driver_tracing(
         openshell_driver_docker::otel_tracing::TRACING,

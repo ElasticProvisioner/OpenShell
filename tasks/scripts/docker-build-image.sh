@@ -41,7 +41,7 @@ prebuilt_arches() {
 required_prebuilt_binaries() {
 	case "$1" in
 		gateway)
-			echo "openshell-gateway"
+			echo "openshell-gateway openshell-driver-docker openshell-driver-podman"
 			;;
 		sandbox)
 			echo "openshell-sandbox"

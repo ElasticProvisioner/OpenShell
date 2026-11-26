@@ -334,6 +334,8 @@ max_service_connections_per_sandbox = 20
 
 # Absolute image preparation and initial supervisor startup budget.
 # Applies to new attempts only; allowed values are 1 through 86400 seconds.
+# It also bounds how long a launched driver may take to start, which includes
+# pulling its supervisor and runtime images.
 image_preparation_timeout_seconds = 1800
 
 # Admission repair window in seconds; existing deadlines are preserved.
@@ -1555,6 +1557,26 @@ policy_dns_ipv6_egress = "auto"
 nat64_prefixes         = ["2001:db8:64::/96"]
 ```
 
+### Launched drivers
+
+The gateway launches the VM, Podman, and Docker drivers as subprocesses. Each driver reads and validates its own `[openshell.drivers.<name>]` table, so the keys in the table stay the same.
+
+The gateway starts `openshell-driver-<name> serve` and passes the table as text on the driver's standard input. After the driver accepts a connection, the gateway sends gateway-owned values over the private socket: the gateway port and listener, gateway name, guest CA path, trusted runtime images from the environment, destination trust, OTLP settings, and the admission policy. The command line carries only the socket path, the gateway's process ID, and the log level. Trace headers and other secrets never appear in arguments or the environment.
+
+A driver exits with status 69 when its backend is not reachable, including when the backend does not answer within 20 seconds, and 78 when its table is invalid. It writes one JSON line describing the reason to standard output first. Standard error stays for logs. The exit status decides what the gateway does; the line explains why, and a crash is never treated as an absent backend.
+
+The gateway owns the admission policy (`allow_driver_config` and `resource_admission`). It validates the keys, removes them from the forwarded table, and sends the policy in `Configure`. The drivers' tables reject `gateway_port`, `guest_tls_ca` and these keys. The gateway drops a legacy `gateway_port` from the Podman table with a warning, because earlier releases accepted and overwrote it. `grpc_endpoint` remains an optional override: `preflight` checks its syntax and scheme, and an `https://` endpoint needs the gateway CA.
+
+Set `driver_dir` in `[openshell.gateway]`. A `driver_dir` in a driver table is deprecated: the gateway removes it with a warning and uses it only when `[openshell.gateway]` sets none. The gateway looks for the driver binary in `driver_dir`, then in `~/.local/libexec/openshell`, `/usr/libexec/openshell`, `/usr/local/libexec/openshell`, and `/usr/local/libexec`, then next to the gateway binary.
+
+When no driver is selected, the gateway tries Kubernetes, then Podman, then Docker. For Podman and Docker it starts the driver with the operator's table, so a configured `socket_path` is honored. The first driver that binds its socket is kept and configured, so detection never starts a driver it then stops. For Docker it does the same with the Docker table. A table that is invalid, or a socket that is not reachable, moves detection to the next candidate and logs the reason. A driver that crashes or times out stops startup. If a driver is selected by name, any such failure stops startup, except that Podman is started again a few times while its socket is unreachable, as the in-process driver retried.
+
+On shutdown, the gateway stops sandboxes through each launched driver and then releases the driver with the launch protocol's `Shutdown` call. A driver defers a `SIGTERM` or `SIGINT` that reaches it from elsewhere, such as the signal a service manager sends to every process of the gateway's unit, until the gateway releases it, the gateway exits, or 30 seconds pass. Sandboxes therefore stop even when the whole unit is signalled.
+
+Each launch gets its own private socket directory, which goes away with the driver. If a launched driver exits while the gateway is running, the gateway logs an error and exits with a nonzero status. Running sandboxes continue.
+
+`openshell-gateway config preflight` runs `openshell-driver-<name> preflight` with the table. The driver checks the table and contacts no backend.
+
 ### Kubernetes
 
 The gateway runs as a Pod and creates paired workload and supervisor Pods in another namespace. The gateway CA is projected from a Kubernetes Secret into supervisor Pods; user client certificate and key entries in that Secret are not exposed to either Pod.
@@ -1975,15 +1997,15 @@ network_name            = "openshell"
 # Rootless socket path. For root Podman use /run/podman/podman.sock.
 # Omit to auto-detect: the driver probes for a responsive Podman socket, then
 # asks the podman CLI where its socket is, and fails to start if neither finds
-# one. Set this to pin a specific Podman machine instead.
+# one. Set this to pin a specific Podman machine instead; gateway driver
+# detection honors it too.
 socket_path             = "/run/user/1000/podman/podman.sock"
 default_image           = "nvcr.io/nvidia/base/ubuntu:24.04"
 image_pull_policy       = "if_not_present" # always | if_not_present | never | newer
 # Optional override. When omitted, Linux uses gateway loopback and Podman
-# Machine uses host.containers.internal.
+# Machine uses host.containers.internal. An https:// endpoint needs the
+# gateway CA from [openshell.gateway]. The gateway supplies the port.
 grpc_endpoint           = "https://127.0.0.1:17670"
-# The gateway overwrites gateway_port from bind_address at runtime.
-gateway_port            = 17670
 # Trusted supervisor-side destination returned for host.openshell.internal.
 # Omit for the platform default: 127.0.0.1 on native Linux and
 # 192.168.127.254 on macOS Podman Machine.
@@ -2127,6 +2149,8 @@ log_level       = "info"
 compute_driver = "vm"
 # Gateway-owned CA injected into the selected local driver.
 guest_tls_ca  = "/var/lib/openshell/guest-tls/ca.pem"
+# Where the gateway looks for the openshell-driver-vm subprocess binary.
+driver_dir    = "/usr/local/libexec/openshell"
 
 # Sandbox launch signing is separate from listener and guest TLS.
 [openshell.gateway.gateway_jwt]
@@ -2137,8 +2161,6 @@ gateway_id       = "openshell"
 
 [openshell.drivers.vm]
 state_dir        = "/var/lib/openshell/vm"
-# Where the gateway looks for the openshell-driver-vm subprocess binary.
-driver_dir       = "/usr/local/libexec/openshell"
 default_image    = "nvcr.io/nvidia/base/ubuntu:24.04"
 # Optional override. When omitted, the gateway derives
 # https://host.openshell.internal:<gateway-port> for the VM driver.
@@ -2318,7 +2340,7 @@ env PATH=/opt/company/e2fsprogs/sbin:/opt/company/e2fsprogs/bin:/usr/bin:/bin /u
 
 Replace the executable and configuration paths with your installation's paths, and run this command as the service account. Preflight and VM image operations search inherited `PATH` entries, then the existing e2fsprogs `sbin` and `bin` directories under `/opt/homebrew/opt/e2fsprogs` and `/usr/local/opt/e2fsprogs`. They prefer `mke2fs` and try `mkfs.ext4` only when `mke2fs` is absent. A selected file that cannot run is an error; fix that installation or the service's `PATH` before rerunning the command.
 
-The command reports each selected executable path and version. Each tool receives only `-V`, with a five-second deadline and an 8 KiB output limit per stream. Missing, non-executable, outdated, or failing tools return a nonzero exit status with corrective guidance and the selected tool's error. The checks create no gateway state or images and do not start a driver or VM. Version checks confirm the installation; they do not test image creation or filesystem recovery.
+The command reports each selected executable path and version. Each tool receives only `-V`, with a five-second deadline and an 8 KiB output limit per stream. Missing, non-executable, outdated, or failing tools return a nonzero exit status with corrective guidance and the selected tool's error. The checks create no gateway state or images and start no VM. The gateway runs the driver's `preflight` command, which only validates the table. Version checks confirm the installation; they do not test image creation or filesystem recovery.
 
 Other drivers do not require these VM tools. A VM configuration table alone does not select the VM driver. When a remote driver socket is configured, preflight reports that host tool checks were not performed; run the check on that host in the driver service's environment with a local VM configuration.
 

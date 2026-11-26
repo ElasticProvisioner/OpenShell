@@ -5,6 +5,7 @@
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use futures::Stream;
 use tracing::Instrument as _;
@@ -265,6 +266,238 @@ pub fn install_driver_tracing(
     }
 
     DriverTracingHandle { provider }
+}
+
+type ExportLayer = tracing_opentelemetry::OpenTelemetryLayer<
+    tracing_subscriber::Registry,
+    opentelemetry_sdk::trace::Tracer,
+>;
+
+/// Collector settings supplied after a launched driver is already logging.
+#[derive(Debug, Clone, Copy)]
+pub struct DeferredExportConfig<'a> {
+    pub endpoint: &'a str,
+    pub protocol: crate::Protocol,
+    /// PEM files for an `https://` collector; see [`crate::OtlpTls::from_files`].
+    pub ca_file: Option<&'a std::path::Path>,
+    pub cert_file: Option<&'a std::path::Path>,
+    pub key_file: Option<&'a std::path::Path>,
+    pub gateway_name: Option<&'a str>,
+    pub service_version: &'static str,
+    /// Collector request headers in `OTEL_EXPORTER_OTLP_HEADERS` format.
+    pub headers: &'a str,
+}
+
+/// A tracing layer whose OpenTelemetry export is installed once, later.
+///
+/// Unlike `reload::Layer`, it forwards `downcast_raw` to the installed layer.
+/// `OpenTelemetrySpanExt::set_parent` finds the OpenTelemetry layer through
+/// that downcast, so a reloadable slot would silently drop the gateway's
+/// parent trace context.
+struct DeferredLayer {
+    slot: Arc<OnceLock<ExportLayer>>,
+}
+
+impl tracing_subscriber::Layer<tracing_subscriber::Registry> for DeferredLayer {
+    fn on_new_span(
+        &self,
+        attrs: &tracing::span::Attributes<'_>,
+        id: &tracing::span::Id,
+        ctx: tracing_subscriber::layer::Context<'_, tracing_subscriber::Registry>,
+    ) {
+        if let Some(layer) = self.slot.get() {
+            layer.on_new_span(attrs, id, ctx);
+        }
+    }
+
+    fn on_record(
+        &self,
+        id: &tracing::span::Id,
+        values: &tracing::span::Record<'_>,
+        ctx: tracing_subscriber::layer::Context<'_, tracing_subscriber::Registry>,
+    ) {
+        if let Some(layer) = self.slot.get() {
+            layer.on_record(id, values, ctx);
+        }
+    }
+
+    fn on_follows_from(
+        &self,
+        id: &tracing::span::Id,
+        follows: &tracing::span::Id,
+        ctx: tracing_subscriber::layer::Context<'_, tracing_subscriber::Registry>,
+    ) {
+        if let Some(layer) = self.slot.get() {
+            layer.on_follows_from(id, follows, ctx);
+        }
+    }
+
+    fn on_event(
+        &self,
+        event: &tracing::Event<'_>,
+        ctx: tracing_subscriber::layer::Context<'_, tracing_subscriber::Registry>,
+    ) {
+        if let Some(layer) = self.slot.get() {
+            layer.on_event(event, ctx);
+        }
+    }
+
+    fn on_enter(
+        &self,
+        id: &tracing::span::Id,
+        ctx: tracing_subscriber::layer::Context<'_, tracing_subscriber::Registry>,
+    ) {
+        if let Some(layer) = self.slot.get() {
+            layer.on_enter(id, ctx);
+        }
+    }
+
+    fn on_exit(
+        &self,
+        id: &tracing::span::Id,
+        ctx: tracing_subscriber::layer::Context<'_, tracing_subscriber::Registry>,
+    ) {
+        if let Some(layer) = self.slot.get() {
+            layer.on_exit(id, ctx);
+        }
+    }
+
+    fn on_close(
+        &self,
+        id: tracing::span::Id,
+        ctx: tracing_subscriber::layer::Context<'_, tracing_subscriber::Registry>,
+    ) {
+        if let Some(layer) = self.slot.get() {
+            layer.on_close(id, ctx);
+        }
+    }
+
+    // `downcast_raw` is an unsafe trait method; this implementation only
+    // returns pointers the installed layer itself returns, or to `self`.
+    #[allow(unsafe_code)]
+    unsafe fn downcast_raw(&self, id: std::any::TypeId) -> Option<*const ()> {
+        if id == std::any::TypeId::of::<Self>() {
+            return Some(std::ptr::from_ref(self).cast());
+        }
+        // SAFETY: the slot is set at most once, and the layer stays at the
+        // same address in the `Arc` for as long as this layer exists.
+        self.slot
+            .get()
+            .and_then(|layer| unsafe { layer.downcast_raw(id) })
+    }
+}
+
+/// Handle to a launched driver's tracing, whose OTLP export starts later.
+///
+/// Cloning shares the same exporter slot. The provider shuts down when the
+/// last clone drops.
+#[derive(Clone)]
+pub struct DeferredDriverTracing {
+    inner: Arc<DeferredInner>,
+}
+
+struct DeferredInner {
+    descriptor: ComputeDriverTracing,
+    slot: Arc<OnceLock<ExportLayer>>,
+    provider: Mutex<Option<SdkTracerProvider>>,
+}
+
+impl Drop for DeferredInner {
+    fn drop(&mut self) {
+        let provider = self
+            .provider
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(provider) = provider
+            && let Err(error) = provider.shutdown()
+        {
+            tracing::warn!(%error, "OTLP tracer provider shutdown failed");
+        }
+    }
+}
+
+impl DeferredDriverTracing {
+    /// Start exporting spans created from now on. Spans created earlier are
+    /// not exported. Later calls are no-ops that return `Ok`, so a retried
+    /// configuration never installs a second exporter.
+    pub fn enable_export(&self, config: DeferredExportConfig<'_>) -> Result<(), SetupError> {
+        use opentelemetry::trace::TracerProvider as _;
+
+        let mut provider_slot = self
+            .inner
+            .provider
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if provider_slot.is_some() {
+            return Ok(());
+        }
+        let transport = crate::CollectorTransport {
+            protocol: config.protocol,
+            headers: crate::parse_otlp_headers(config.headers),
+            tls: crate::OtlpTls::from_files(config.ca_file, config.cert_file, config.key_file)?,
+        };
+        let descriptor = self.inner.descriptor;
+        let (provider, error) = descriptor.provider_for(
+            Some(config.endpoint),
+            &transport,
+            config.service_version,
+            config.gateway_name,
+            Some(descriptor.compute_driver()),
+        );
+        if let Some(error) = error {
+            return Err(error);
+        }
+        let Some(provider) = provider else {
+            return Ok(());
+        };
+        let layer =
+            tracing_opentelemetry::layer().with_tracer(provider.tracer(descriptor.service_name()));
+        if self.inner.slot.set(layer).is_err() {
+            let _ = provider.shutdown();
+            return Ok(());
+        }
+        tracing::info!(endpoint = config.endpoint, "OTLP exporting enabled");
+        *provider_slot = Some(provider);
+        Ok(())
+    }
+}
+
+/// Install logging for a launched driver with an empty OTLP slot to fill
+/// later with [`DeferredDriverTracing::enable_export`].
+///
+/// Logs go to stderr: a launched driver's stdout carries its start-up result.
+#[must_use]
+pub fn install_deferred_driver_tracing(
+    descriptor: ComputeDriverTracing,
+    log_level: &str,
+    ansi: bool,
+) -> DeferredDriverTracing {
+    let slot = Arc::new(OnceLock::new());
+    // The span filter stays on the deferred layer's wrapper, so it is
+    // registered before the OpenTelemetry layer exists.
+    tracing_subscriber::registry()
+        .with(
+            DeferredLayer {
+                slot: Arc::clone(&slot),
+            }
+            .with_filter(tracing_subscriber::filter::filter_fn(|metadata| {
+                metadata.is_span() && !metadata.target().starts_with("opentelemetry")
+            })),
+        )
+        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(log_level)))
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_ansi(ansi)
+                .with_writer(std::io::stderr),
+        )
+        .init();
+    DeferredDriverTracing {
+        inner: Arc::new(DeferredInner {
+            descriptor,
+            slot,
+            provider: Mutex::new(None),
+        }),
+    }
 }
 
 #[cfg(test)]

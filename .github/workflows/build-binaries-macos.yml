@@ -45,6 +45,12 @@ jobs:
           - package: openshell-gateway
             binary: openshell-gateway
             triple: aarch64-apple-darwin
+          - package: openshell-driver-podman
+            binary: openshell-driver-podman
+            triple: aarch64-apple-darwin
+          - package: openshell-driver-docker
+            binary: openshell-driver-docker
+            triple: aarch64-apple-darwin
           - package: openshell-supervisor
             binary: openshell-supervisor
             triple: aarch64-apple-darwin

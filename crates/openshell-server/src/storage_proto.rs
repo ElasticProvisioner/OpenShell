@@ -640,6 +640,7 @@ mod tests {
         let mut isolation_methods = BTreeSet::new();
         let mut sandbox_protocol_methods = BTreeSet::new();
         let mut supervisor_host_methods = BTreeSet::new();
+        let mut driver_launch_methods = BTreeSet::new();
         for file in &public.file {
             let package = file.package.as_deref().unwrap_or_default();
             for service in &file.service {
@@ -670,6 +671,16 @@ mod tests {
                     supervisor_host_methods.extend(service.method.iter().map(|method| {
                         method.name.as_deref().expect("supervisor host method name")
                     }));
+                }
+                // Private gateway-to-driver launch protocol: served by launched
+                // compute drivers, never part of the public SDK surface.
+                if package == "openshell.driver.launch.v1" {
+                    assert_eq!(service_name, "DriverLaunch");
+                    driver_launch_methods.extend(
+                        service.method.iter().map(|method| {
+                            method.name.as_deref().expect("driver launch method name")
+                        }),
+                    );
                 }
                 if !matches!(
                     (package, service_name),
@@ -711,6 +722,10 @@ mod tests {
             BTreeSet::from(["Exchange", "Mediate"])
         );
         assert_eq!(supervisor_host_methods, BTreeSet::from(["Attach"]));
+        assert_eq!(
+            driver_launch_methods,
+            BTreeSet::from(["Configure", "GetLaunchInfo", "Shutdown"])
+        );
         for signature in PROVIDER_READINESS_RPC_SIGNATURES {
             assert!(
                 methods.iter().any(|method| method == signature),
@@ -731,7 +746,7 @@ mod tests {
         }
         assert_eq!(
             compiled_method_count,
-            121 + PROVIDER_READINESS_RPC_SIGNATURES.len()
+            124 + PROVIDER_READINESS_RPC_SIGNATURES.len()
                 + PEER_OWNER_RPC_SIGNATURES.len()
                 + PEER_CONFIG_RPC_SIGNATURES.len()
                 + isolation_methods.len()

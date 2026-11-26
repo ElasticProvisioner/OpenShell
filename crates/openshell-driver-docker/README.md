@@ -317,3 +317,16 @@ The supervisor owns these security-critical variables:
 Template and sandbox environment is encoded in the protected bootstrap and
 exposed only to workload children. Workload input cannot override
 security-critical supervisor variables.
+
+## Launched mode
+
+```text
+openshell-driver-docker serve --bind-socket <path> --expected-peer-pid <pid> --log-level <level>   < table.toml
+openshell-driver-docker preflight                                                                  < table.toml
+```
+
+The gateway passes the `[openshell.drivers.docker]` table on stdin and gateway metadata in a `Configure` call (`proto/driver_launch.proto`). `settings_from_table` in `src/launch.rs` is the only place the table is parsed and validated.
+
+`serve` resolves the Docker socket from `socket_path`, then `DOCKER_HOST` and the usual locations, and pings it before it binds. The ping gets 20 seconds, so the gateway, which waits 30 seconds for a driver to start, receives the report instead of killing the driver. It exits 69 when Docker is not reachable and 78 when the table is invalid. Until `Configure` succeeds, both gRPC services (`ComputeDriver` and `ComputeDriverConfigurationUpdates`) return `UNAVAILABLE` and the driver creates no volumes, networks or containers. `preflight` validates the table without contacting Docker.
+
+The gateway supplies the CA, the admission policy, its listener address, trusted runtime images from its environment, destination trust, and OTLP settings through `Configure`, so the table rejects `guest_tls_ca`, `allow_driver_config` and `resource_admission`. `grpc_endpoint` remains an optional override, and an `https://` endpoint needs the gateway CA.

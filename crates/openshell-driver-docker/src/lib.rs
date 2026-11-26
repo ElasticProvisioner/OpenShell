@@ -7,6 +7,7 @@
 
 mod image_update;
 mod isolation;
+pub mod launch;
 pub mod otel_tracing;
 mod workspace;
 
@@ -288,6 +289,18 @@ pub struct DockerComputeConfig {
 impl DockerComputeConfig {
     /// Validate startup configuration without connecting to Docker.
     pub fn validate_configuration(&self, gateway_bind_address: SocketAddr) -> CoreResult<()> {
+        self.validate_table()?;
+        if gateway_bind_address.port() == 0 {
+            return Err(Error::config(
+                "docker compute driver requires a fixed non-zero gateway bind port",
+            ));
+        }
+        Ok(())
+    }
+
+    /// The checks that need neither the gateway nor Docker: everything about
+    /// the operator's table.
+    pub fn validate_table(&self) -> CoreResult<()> {
         self.resource_admission.validate().map_err(Error::config)?;
         if let Some(socket_path) = self.socket_path.as_deref()
             && socket_path.to_str().is_none()
@@ -306,11 +319,6 @@ impl DockerComputeConfig {
         if let Some(socket) = self.provider_spiffe_workload_api_socket.as_deref() {
             openshell_core::driver_utils::validate_provider_spiffe_unix_socket(socket)
                 .map_err(Error::config)?;
-        }
-        if gateway_bind_address.port() == 0 {
-            return Err(Error::config(
-                "docker compute driver requires a fixed non-zero gateway bind port",
-            ));
         }
         Ok(())
     }

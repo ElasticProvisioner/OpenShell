@@ -24,13 +24,12 @@ miette = { workspace = true }
 tokio = { workspace = true }
 
 [target.'cfg(not(target_os = "windows"))'.dependencies]
-openshell-driver-docker = { path = "../openshell-driver-docker", optional = true }
 openshell-driver-kubernetes = { path = "../openshell-driver-kubernetes", optional = true }
-openshell-driver-podman = { path = "../openshell-driver-podman", optional = true }
-openshell-policy = { path = "../openshell-policy", optional = true }
+openshell-driver-launch = { path = "../openshell-driver-launch", optional = true }
+openshell-driver-sdk = { path = "../openshell-driver-sdk", optional = true }
 hyper-util = { workspace = true, optional = true }
-nix = { workspace = true, optional = true }
-serde = { workspace = true, optional = true }
+toml = { workspace = true, optional = true }
+tempfile = { version = "3", optional = true }
 rustix = { workspace = true, optional = true }
 tonic = { workspace = true, optional = true }
 tower = { workspace = true, optional = true }
@@ -51,19 +50,22 @@ in-tree-compute-drivers = [
     "compute-driver-mxc",
 ]
 compute-driver-mxc = ["dep:openshell-driver-mxc"]
-compute-driver-docker = ["dep:openshell-driver-docker", "dep:openshell-otel"]
+compute-driver-docker = ["driver-launcher"]
 compute-driver-kubernetes = ["dep:openshell-driver-kubernetes", "dep:openshell-otel"]
-compute-driver-podman = ["dep:openshell-driver-podman", "dep:openshell-otel"]
-compute-driver-vm = [
-    "dep:openshell-policy",
+compute-driver-podman = ["driver-launcher"]
+compute-driver-vm = ["driver-launcher"]
+## Launch a compute driver as a subprocess with `serve` and `Configure`.
+driver-launcher = [
+    "dep:openshell-driver-launch",
+    "dep:openshell-driver-sdk",
     "dep:openshell-otel",
     "dep:hyper-util",
-    "dep:nix",
-    "dep:serde",
     "dep:rustix",
     "dep:tonic",
     "dep:tower",
     "dep:tracing",
+    "dep:toml",
+    "dep:tempfile",
 ]
 telemetry = ["openshell-core/telemetry", "openshell-server/telemetry"]
 ## Convenience alias: every default feature except `telemetry`. Build a
@@ -82,6 +84,10 @@ workspace = true
 
 [dev-dependencies]
 openshell-crypto = { workspace = true, default-features = false, features = ["aws-lc"] }
+nix = { workspace = true }
 rcgen = { workspace = true }
 tempfile = "3"
+openshell-otel-test-support = { path = "../openshell-otel-test-support" }
 toml = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
+tokio-stream = { workspace = true, features = ["net"] }

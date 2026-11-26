@@ -534,6 +534,10 @@ ensure_sandbox_image_available() {
 }
 
 e2e_build_gateway_binaries "${ROOT}" TARGET_DIR GATEWAY_BIN CLI_BIN
+# The gateway launches the Docker driver as a subprocess. Build it, or use the
+# prebuilt one, and point the gateway at its directory.
+e2e_build_external_driver \
+  "${ROOT}" openshell-driver-docker openshell-driver-docker DRIVER_BIN
 export OPENSHELL_BIN="${CLI_BIN}"
 
 SUPERVISOR_IMAGE="$(resolve_docker_supervisor_image)"
@@ -629,6 +633,7 @@ GATEWAY_CONFIG="${STATE_DIR}/gateway.toml"
 {
   printf '[openshell]\nversion = 2\n\n'
   printf '[openshell.gateway]\nlog_level = "info"\n'
+  printf 'driver_dir = %s\n' "$(toml_string "$(dirname "${DRIVER_BIN}")")"
   if [ "${IMAGE_UPDATES_MODE}" = "1" ]; then
     printf 'enable_sandbox_updates = true\n'
   fi

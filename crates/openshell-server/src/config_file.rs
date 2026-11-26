@@ -159,6 +159,8 @@ pub struct GatewayFileSection {
     #[serde(default)]
     pub max_service_connections_per_sandbox: Option<u32>,
     /// Absolute preparation budget for new attempts; existing deadlines persist.
+    /// It also bounds how long a launched driver may take to start, which
+    /// includes pulling its supervisor and runtime images.
     #[serde(default)]
     pub image_preparation_timeout_seconds: Option<u32>,
     /// Admission repair window in seconds, between 1 and 86400.
@@ -213,6 +215,13 @@ pub struct GatewayFileSection {
     // ── Sandbox client TLS ───────────────────────────────────────────────
     #[serde(default)]
     pub guest_tls_ca: Option<PathBuf>,
+
+    // ── Launched compute drivers ─────────────────────────────────────────
+    /// Directory searched first for launched compute-driver binaries such as
+    /// `openshell-driver-vm`. The gateway owns it; a `driver_dir` in a
+    /// `[openshell.drivers.<name>]` table is deprecated.
+    #[serde(default)]
+    pub driver_dir: Option<PathBuf>,
 
     // ── TLS toggle ───────────────────────────────────────────────────────
     /// When `true`, the gateway listens on plaintext HTTP and ignores any

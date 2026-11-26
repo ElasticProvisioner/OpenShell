@@ -265,6 +265,43 @@ pub fn parse_id_map_entry(
     Ok((container_id, host_id, size))
 }
 
+/// Parse and validate the operator's `[openshell.drivers.podman]` table.
+///
+/// This is the only place the table is parsed. It has no side effects: it
+/// needs neither the gateway context nor Podman. An empty table selects the
+/// defaults.
+pub fn settings_from_table(table: &str) -> Result<PodmanComputeConfig, String> {
+    // The gateway supplies these through `Configure`. The standalone driver
+    // still takes them as flags, so the struct keeps the fields.
+    let keys: toml::Table =
+        toml::from_str(table).map_err(|error| format!("invalid podman driver table: {error}"))?;
+    if let Some(key) = GATEWAY_SUPPLIED_KEYS
+        .iter()
+        .find(|key| keys.contains_key(**key))
+    {
+        return Err(format!(
+            "invalid podman driver table: `{key}` is supplied by the gateway and cannot be set here"
+        ));
+    }
+    let mut config: PodmanComputeConfig =
+        toml::from_str(table).map_err(|error| format!("invalid podman driver table: {error}"))?;
+    if !config.grpc_endpoint.trim().is_empty() {
+        openshell_driver_sdk::validate_grpc_endpoint(&config.grpc_endpoint)?;
+    }
+    config
+        .validate_configuration()
+        .map_err(|error| error.to_string())?;
+    Ok(config)
+}
+
+/// Settings the gateway supplies through `Configure` instead of the table.
+const GATEWAY_SUPPLIED_KEYS: &[&str] = &[
+    "gateway_port",
+    "guest_tls_ca",
+    "allow_driver_config",
+    "resource_admission",
+];
+
 impl PodmanComputeConfig {
     /// Validate and normalize startup configuration without connecting to Podman.
     pub fn validate_configuration(&mut self) -> Result<(), crate::client::PodmanApiError> {
@@ -636,6 +673,35 @@ impl std::fmt::Debug for PodmanComputeConfig {
             .field("uidmap", &self.uidmap)
             .field("gidmap", &self.gidmap)
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod table_tests {
+    use super::*;
+
+    #[test]
+    fn gateway_supplied_keys_are_rejected() {
+        for key in [
+            "gateway_port = 8080",
+            "guest_tls_ca = \"/ca.pem\"",
+            "allow_driver_config = true",
+            "resource_admission = {}",
+        ] {
+            let error = settings_from_table(key).unwrap_err();
+            assert!(error.contains("supplied by the gateway"), "{error}");
+        }
+    }
+
+    #[test]
+    fn grpc_endpoint_is_checked_for_syntax_and_scheme() {
+        settings_from_table("grpc_endpoint = \"https://gw.test:8443\"").unwrap();
+        for bad in ["ftp://gw.test:1", "gw.test:8080"] {
+            assert!(
+                settings_from_table(&format!("grpc_endpoint = \"{bad}\"")).is_err(),
+                "accepted: {bad}"
+            );
+        }
     }
 }
 

@@ -27,6 +27,8 @@ path = "src/bin/openshell-vm-init.rs"
 openshell-core = { path = "../openshell-core", default-features = false, features = ["clap"] }
 openshell-isolation-interface = { path = "../openshell-isolation-interface" }
 openshell-sandbox-backend = { path = "../openshell-sandbox-backend" }
+openshell-driver-launch = { path = "../openshell-driver-launch", optional = true }
+openshell-driver-sdk = { path = "../openshell-driver-sdk", optional = true }
 openshell-otel = { path = "../openshell-otel", optional = true }
 openshell-policy = { path = "../openshell-policy", optional = true }
 openshell-driver-podman = { path = "../openshell-driver-podman", optional = true }
@@ -61,6 +63,7 @@ libloading = { version = "0.8", optional = true }
 tar = { version = "0.4", optional = true }
 flate2 = { version = "1", optional = true }
 sha2 = { version = "0.10", optional = true }
+toml = { workspace = true, optional = true }
 zstd = { version = "0.14", optional = true }
 
 [features]
@@ -79,7 +82,10 @@ compute-driver = [
     "dep:miette",
     "dep:nix",
     "dep:oci-client",
+    "dep:openshell-driver-launch",
+    "dep:openshell-driver-sdk",
     "dep:openshell-otel",
+    "dep:toml",
     "openshell-core/otel",
     "dep:openshell-policy",
     "dep:openshell-driver-podman",
@@ -116,6 +122,8 @@ telemetry = ["openshell-core/telemetry"]
 defaults-without-telemetry = ["compute-driver"]
 
 [dev-dependencies]
+hyper-util = { workspace = true }
+tower = { workspace = true }
 openshell-otel-test-support = { path = "../openshell-otel-test-support" }
 temp-env = "0.3"
 tempfile = "3"

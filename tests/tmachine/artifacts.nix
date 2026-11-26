@@ -201,6 +201,8 @@ rec {
 
       cargo build --target ${gnuToolchain.target} \
         -p openshell-gateway \
+        -p openshell-driver-podman \
+        -p openshell-driver-docker \
         -p openshell-supervisor
 
       install -D -m 0755 \
@@ -214,6 +216,14 @@ rec {
       install -D -m 0755 \
         target/${gnuToolchain.target}/debug/openshell-gateway \
         artifacts/binaries/${gnuToolchain.target}/openshell-gateway
+
+      install -D -m 0755 \
+        target/${gnuToolchain.target}/debug/openshell-driver-podman \
+        artifacts/binaries/${gnuToolchain.target}/openshell-driver-podman
+
+      install -D -m 0755 \
+        target/${gnuToolchain.target}/debug/openshell-driver-docker \
+        artifacts/binaries/${gnuToolchain.target}/openshell-driver-docker
 
       install -D -m 0755 \
         target/${gnuToolchain.target}/debug/openshell-supervisor \
@@ -325,6 +335,12 @@ rec {
         artifacts/binaries/${gnuToolchain.target}/openshell-supervisor \
         deploy/docker/.build/prebuilt-binaries/${dockerArch}/openshell-supervisor
 
+      for driver in openshell-driver-docker openshell-driver-podman; do
+        install -D -m 0755 \
+          artifacts/binaries/${gnuToolchain.target}/$driver \
+          deploy/docker/.build/prebuilt-binaries/${dockerArch}/$driver
+      done
+
       install -D -m 0755 \
         artifacts/binaries/${muslToolchain.target}/openshell-sandbox \
         deploy/docker/.build/prebuilt-binaries/${dockerArch}/openshell-sandbox
@@ -385,6 +401,8 @@ rec {
         OPENSHELL_GATEWAY_BINARY="$root/artifacts/binaries/${gnuToolchain.target}/openshell-gateway" \
         OPENSHELL_PROVER_BINARY="$root/artifacts/binaries/${muslToolchain.target}/openshell-prover" \
         OPENSHELL_DRIVER_VM_BINARY="$root/artifacts/binaries/${gnuToolchain.target}/openshell-driver-vm" \
+        OPENSHELL_DRIVER_PODMAN_BINARY="$root/artifacts/binaries/${gnuToolchain.target}/openshell-driver-podman" \
+        OPENSHELL_DRIVER_DOCKER_BINARY="$root/artifacts/binaries/${gnuToolchain.target}/openshell-driver-docker" \
         OPENSHELL_DEB_VERSION="$package_version" \
         OPENSHELL_DEB_ARCH=${dockerArch} \
         OPENSHELL_OUTPUT_DIR="$root/artifacts/packages" \
@@ -420,6 +438,8 @@ rec {
       for binary in \
         artifacts/binaries/${muslToolchain.target}/openshell \
         artifacts/binaries/${gnuToolchain.target}/openshell-gateway \
+        artifacts/binaries/${gnuToolchain.target}/openshell-driver-podman \
+        artifacts/binaries/${gnuToolchain.target}/openshell-driver-docker \
         artifacts/binaries/${muslToolchain.target}/openshell-prover; do
         if [[ ! -x "$binary" ]]; then
           echo "missing $binary; run build-artifacts-binaries first" >&2
@@ -438,6 +458,8 @@ rec {
           --volume "$root:/repo:ro" \
           --volume "$root/artifacts/binaries/${muslToolchain.target}/openshell:/binaries/openshell:ro" \
           --volume "$root/artifacts/binaries/${gnuToolchain.target}/openshell-gateway:/binaries/openshell-gateway:ro" \
+          --volume "$root/artifacts/binaries/${gnuToolchain.target}/openshell-driver-podman:/binaries/openshell-driver-podman:ro" \
+          --volume "$root/artifacts/binaries/${gnuToolchain.target}/openshell-driver-docker:/binaries/openshell-driver-docker:ro" \
           --volume "$root/artifacts/binaries/${muslToolchain.target}/openshell-prover:/binaries/openshell-prover:ro" \
           --volume "$output_dir:/out" \
           --volume openshell-rpm-cargo:/root/.cargo/registry \

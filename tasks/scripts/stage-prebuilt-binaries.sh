@@ -85,7 +85,8 @@ detect_arches() {
 components_for_target() {
   case "$1" in
     gateway)
-      echo "gateway"
+      # The gateway image launches Docker and Podman as subprocesses.
+      echo "gateway driver-docker driver-podman"
       ;;
     sandbox)
       echo "sandbox"
@@ -94,7 +95,7 @@ components_for_target() {
       echo "supervisor"
       ;;
     all)
-      echo "gateway sandbox supervisor"
+      echo "gateway driver-docker driver-podman sandbox supervisor"
       ;;
     *)
       usage
@@ -108,6 +109,16 @@ resolve_component() {
     gateway)
       crate=openshell-gateway
       binary=openshell-gateway
+      target_libc=gnu
+      ;;
+    driver-docker)
+      crate=openshell-driver-docker
+      binary=openshell-driver-docker
+      target_libc=gnu
+      ;;
+    driver-podman)
+      crate=openshell-driver-podman
+      binary=openshell-driver-podman
       target_libc=gnu
       ;;
     sandbox)
@@ -169,6 +180,9 @@ build_component_for_arch() {
   features="${EXTRA_CARGO_FEATURES:-}"
   if [[ "$component" == "gateway" ]]; then
     features="${features} vendored-z3"
+  elif [[ "$component" == driver-* ]]; then
+    # The drivers define neither feature.
+    features=""
   fi
   current_host_os="$(host_os)"
   current_host_arch="$(host_arch)"

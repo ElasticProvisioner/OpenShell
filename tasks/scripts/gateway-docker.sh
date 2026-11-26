@@ -140,9 +140,10 @@ if [[ -n "${CARGO_BUILD_JOBS:-}" ]]; then
   CARGO_BUILD_JOBS_ARG=(-j "${CARGO_BUILD_JOBS}")
 fi
 
-echo "Building openshell-gateway..."
+echo "Building openshell-gateway and openshell-driver-docker..."
 cargo build ${CARGO_BUILD_JOBS_ARG[@]+"${CARGO_BUILD_JOBS_ARG[@]}"} \
-  -p openshell-gateway --bin openshell-gateway
+  -p openshell-gateway --bin openshell-gateway \
+  -p openshell-driver-docker --bin openshell-driver-docker
 
 TLS_DIR="${STATE_DIR}/tls"
 echo "Generating local gateway credentials..."
@@ -161,6 +162,7 @@ version = 2
 [openshell.gateway]
 name = "${GATEWAY_NAME}"
 compute_driver = "docker"
+driver_dir = "${ROOT}/target/debug"
 disable_tls = true
 
 [openshell.gateway.auth]

@@ -1800,8 +1800,9 @@ async fn terminate_signal() {
 }
 
 pub use compute::{
-    AcquiredRemoteDriverEndpoint, DriverWatchStream, ManagedDriverProcess, SharedComputeDriver,
-    SharedComputeDriverAppEndpoints, SharedComputeDriverConfigurationUpdates,
+    AcquiredRemoteDriverEndpoint, DriverProcessState, DriverWatchStream, GracefulStop,
+    ManagedDriverProcess, SharedComputeDriver, SharedComputeDriverAppEndpoints,
+    SharedComputeDriverConfigurationUpdates,
 };
 
 /// Driver instance returned by a compiled compute-driver factory.
@@ -1896,12 +1897,65 @@ pub trait ComputeDriverFactory: Send + Sync {
     }
 }
 
+/// A driver process that detection started and found available.
+///
+/// The same process serves once it is built, so detection never starts a
+/// driver it then has to stop. Dropping it without building stops it.
+pub struct DetectedDriver(Box<dyn std::any::Any + Send>);
+
+impl DetectedDriver {
+    /// Hand a started driver to the build step that will configure it.
+    pub fn new<T: Send + 'static>(driver: T) -> Self {
+        Self(Box::new(driver))
+    }
+}
+
+/// What a table-aware detection probe found.
+pub enum DriverDetection {
+    /// The driver can serve with this table. It may carry the running driver
+    /// process, which the factory's build step takes with
+    /// [`ComputeDriverBuildContext::take_detected_driver`].
+    Available(Option<DetectedDriver>),
+    /// The driver's backend is not reachable with this table.
+    Unavailable(String),
+    /// The driver rejected this table.
+    InvalidConfig(String),
+    /// Starting the driver failed for another reason, such as a crash or a
+    /// timeout. Unlike an unreachable backend, this stops startup instead of
+    /// falling through to another driver.
+    Failed(String),
+}
+
+/// What a table-aware detection probe receives.
+pub struct DriverDetectionContext<'a> {
+    /// The driver's merged `[openshell.drivers.<name>]` table.
+    pub table: &'a toml::map::Map<String, toml::Value>,
+    /// `driver_dir` from `[openshell.gateway]`.
+    pub driver_dir: Option<&'a Path>,
+    pub gateway_log_level: &'a str,
+}
+
+/// A table-aware detection probe.
+pub type DriverDetectFn = fn(&DriverDetectionContext<'_>) -> DriverDetection;
+
+/// The driver a registration's detection started, shared by its clones.
+type DetectedSlot = Arc<Mutex<Option<DetectedDriver>>>;
+
+#[derive(Clone, Copy)]
+enum DetectionProbe {
+    /// A cheap probe of the environment.
+    Environment(fn() -> bool),
+    /// A probe that needs the operator's table and may start the driver.
+    Table(DriverDetectFn),
+}
+
 /// One named compiled-driver registration.
 #[derive(Clone)]
 pub struct ComputeDriverRegistration {
     name: String,
     detection_priority: u16,
-    detect: Option<fn() -> bool>,
+    detect: Option<DetectionProbe>,
+    detected: DetectedSlot,
     factory: Arc<dyn ComputeDriverFactory>,
     telemetry_category: TelemetryComputeDriver,
     in_process_tracing: Option<openshell_otel::ComputeDriverTracing>,
@@ -1931,11 +1985,21 @@ impl ComputeDriverRegistration {
         Ok(Self {
             name,
             detection_priority,
-            detect,
+            detect: detect.map(DetectionProbe::Environment),
+            detected: DetectedSlot::default(),
             factory: Arc::new(factory),
             telemetry_category: TelemetryComputeDriver::custom(),
             in_process_tracing: None,
         })
+    }
+
+    /// Detect this driver with its own table instead of an environment
+    /// probe. The probe's result decides whether the driver is auto-selected;
+    /// an invalid table is logged and the next candidate is tried.
+    #[must_use]
+    pub fn with_table_detection(mut self, probe: DriverDetectFn) -> Self {
+        self.detect = Some(DetectionProbe::Table(probe));
+        self
     }
 
     /// Assign a bounded telemetry category chosen by the binary composition
@@ -1971,9 +2035,23 @@ pub struct ComputeDriverRegistry {
     drivers: BTreeMap<String, ComputeDriverRegistration>,
 }
 
+/// A candidate that auto-detection passed over.
+#[derive(Clone, Debug)]
+pub(crate) struct SkippedDriver {
+    pub(crate) name: String,
+    pub(crate) reason: String,
+    /// The candidate's table is invalid, which an operator probably wants to
+    /// hear about.
+    pub(crate) invalid_config: bool,
+}
+
 #[derive(Clone, Debug)]
 struct ComputeDriverDetection {
     available: Vec<String>,
+    /// Why each candidate that was probed and not selected was passed over.
+    skipped: Vec<SkippedDriver>,
+    /// A candidate whose start failed outright, as `(driver, reason)`.
+    failure: Option<(String, String)>,
 }
 
 impl ComputeDriverDetection {
@@ -1989,6 +2067,15 @@ pub(crate) enum ComputeDriverSelection {
 }
 
 impl ComputeDriverSelection {
+    /// The candidates auto-detection passed over before it chose a driver. A
+    /// configured driver passes over none.
+    pub(crate) fn skipped(&self) -> &[SkippedDriver] {
+        match self {
+            Self::Configured { .. } => &[],
+            Self::AutoDetected(detection) => &detection.skipped,
+        }
+    }
+
     pub(crate) fn name(&self) -> &str {
         match self {
             Self::Configured { name } => name,
@@ -2053,7 +2140,11 @@ impl ComputeDriverRegistry {
             .and_then(ComputeDriverRegistration::in_process_tracing)
     }
 
-    fn detect(&self) -> ComputeDriverDetection {
+    fn detect(
+        &self,
+        file: Option<&config_file::ConfigFile>,
+        gateway_log_level: &str,
+    ) -> ComputeDriverDetection {
         let mut candidates = self
             .drivers
             .values()
@@ -2064,23 +2155,147 @@ impl ComputeDriverRegistry {
                 .cmp(&right.detection_priority)
                 .then_with(|| left.name.cmp(&right.name))
         });
-        let available = candidates
-            .into_iter()
-            .filter(|registration| registration.detect.is_some_and(|detect| detect()))
-            .map(|registration| registration.name.clone())
-            .collect();
-        ComputeDriverDetection { available }
+        let mut available = Vec::new();
+        let mut skipped = Vec::new();
+        let mut failure = None;
+        for registration in candidates {
+            match registration.detect {
+                Some(DetectionProbe::Environment(detect)) => {
+                    if detect() {
+                        available.push(registration.name.clone());
+                    } else {
+                        skipped.push(SkippedDriver {
+                            name: registration.name.clone(),
+                            reason: "not detected".to_string(),
+                            invalid_config: false,
+                        });
+                    }
+                }
+                Some(DetectionProbe::Table(probe)) => {
+                    // A probe may start the driver, so run it only while no
+                    // earlier candidate has been found.
+                    if !available.is_empty() {
+                        continue;
+                    }
+                    // Normalize legacy keys in a copy for this candidate alone, so
+                    // the driver sees the same table it would after selection
+                    // and no other candidate's trust configuration changes.
+                    let mut candidate = file.cloned();
+                    if let Some(candidate) = candidate.as_mut()
+                        && let Err(error) = config_file::normalize_legacy_podman_ca_bundle(
+                            candidate,
+                            &registration.name,
+                        )
+                    {
+                        skipped.push(SkippedDriver {
+                            name: registration.name.clone(),
+                            reason: error.to_string(),
+                            invalid_config: true,
+                        });
+                        continue;
+                    }
+                    let file = candidate.as_ref();
+                    let table = file
+                        .map(|file| {
+                            config_file::driver_table(
+                                &registration.name,
+                                &file.openshell.gateway,
+                                file.openshell.drivers.get(&registration.name),
+                            )
+                        })
+                        .and_then(|value| match value {
+                            toml::Value::Table(table) => Some(table),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    let context = DriverDetectionContext {
+                        table: &table,
+                        driver_dir: file
+                            .and_then(|file| file.openshell.gateway.driver_dir.as_deref()),
+                        gateway_log_level,
+                    };
+                    match probe(&context) {
+                        DriverDetection::Available(driver) => {
+                            // Replacing an earlier detection stops that driver.
+                            *registration
+                                .detected
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner) = driver;
+                            available.push(registration.name.clone());
+                        }
+                        DriverDetection::Unavailable(reason) => {
+                            skipped.push(SkippedDriver {
+                                name: registration.name.clone(),
+                                reason,
+                                invalid_config: false,
+                            });
+                        }
+                        DriverDetection::Failed(reason) => {
+                            failure = Some((registration.name.clone(), reason));
+                            break;
+                        }
+                        DriverDetection::InvalidConfig(reason) => {
+                            skipped.push(SkippedDriver {
+                                name: registration.name.clone(),
+                                reason,
+                                invalid_config: true,
+                            });
+                        }
+                    }
+                }
+                None => {}
+            }
+        }
+        ComputeDriverDetection {
+            available,
+            skipped,
+            failure,
+        }
     }
 
     pub(crate) fn select(&self, configured_driver: Option<&str>) -> Result<ComputeDriverSelection> {
+        self.select_with_file(configured_driver, None, "info")
+    }
+
+    /// Select the configured driver, or auto-detect one using the tables in
+    /// `file`.
+    pub(crate) fn select_with_file(
+        &self,
+        configured_driver: Option<&str>,
+        file: Option<&config_file::ConfigFile>,
+        gateway_log_level: &str,
+    ) -> Result<ComputeDriverSelection> {
         match configured_driver {
             None => {
-                let detection = self.detect();
+                let detection = self.detect(file, gateway_log_level);
+                if let Some((name, reason)) = &detection.failure {
+                    return Err(Error::execution(format!(
+                        "compute driver '{name}' failed while auto-detection started it: {reason}"
+                    )));
+                }
                 if detection.selected().is_none() {
-                    return Err(Error::config(
+                    let reasons = detection
+                        .skipped
+                        .iter()
+                        .map(|skipped| {
+                            let invalid = if skipped.invalid_config {
+                                "invalid configuration: "
+                            } else {
+                                ""
+                            };
+                            format!("{}: {invalid}{}", skipped.name, skipped.reason)
+                        })
+                        .collect::<Vec<_>>()
+                        .join("; ");
+                    let detail = if reasons.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" ({reasons})")
+                    };
+                    return Err(Error::config(format!(
                         "no compute driver configured and auto-detection found no suitable installed \
-                        driver; set --compute-driver <name> or OPENSHELL_COMPUTE_DRIVER=<name>",
-                    ));
+                        driver{detail}; set --compute-driver <name> or OPENSHELL_COMPUTE_DRIVER=<name>"
+                    )));
                 }
                 Ok(ComputeDriverSelection::AutoDetected(detection))
             }
@@ -2146,6 +2361,21 @@ impl ComputeDriverConfigContext<'_> {
         self.driver_startup.gateway_tls_enabled
     }
 
+    /// `driver_dir` from `[openshell.gateway]`: where launched compute-driver
+    /// binaries are searched for first.
+    #[must_use]
+    pub fn driver_dir(&self) -> Option<&Path> {
+        self.driver_startup
+            .file
+            .and_then(|file| file.openshell.gateway.driver_dir.as_deref())
+    }
+
+    /// The selected driver's merged TOML table, undecoded. A launched driver
+    /// parses and validates it itself.
+    pub fn driver_table(&self) -> Result<toml::map::Map<String, toml::Value>> {
+        compute::driver_config::driver_table_from_context(self.driver_startup, self.driver_name)
+    }
+
     /// Deserialize the selected driver's merged TOML table.
     pub fn driver_config<T>(&self) -> Result<T>
     where
@@ -2166,9 +2396,39 @@ pub struct ComputeDriverBuildContext<'a> {
     /// Pool size limits from `[openshell.gateway.supervisor_pool]`, defaults
     /// filled in.
     supervisor_pool_limits: openshell_supervisor_control::PoolLimits,
+    /// The driver this driver's detection started, if it did.
+    detected: DetectedSlot,
+    /// The gateway's budget for preparing images
+    /// (`image_preparation_timeout_seconds`).
+    image_preparation_timeout: Duration,
 }
 
 impl ComputeDriverBuildContext<'_> {
+    /// The gateway's budget for preparing images, which includes the images
+    /// a driver pulls while it is constructed.
+    #[must_use]
+    pub fn image_preparation_timeout(&self) -> Duration {
+        self.image_preparation_timeout
+    }
+
+    /// Take the driver process that auto-detection started and kept running
+    /// for this driver, if its type is `T`. Detection happens once, so a
+    /// second call returns `None`.
+    pub fn take_detected_driver<T: 'static>(&self) -> Option<T> {
+        let mut slot = self
+            .detected
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let detected = slot.take()?;
+        match detected.0.downcast::<T>() {
+            Ok(driver) => Some(*driver),
+            Err(other) => {
+                *slot = Some(DetectedDriver(other));
+                None
+            }
+        }
+    }
+
     /// Register an optional in-process application endpoint resolver during build.
     /// Existing factories need not provide this extension.
     pub fn register_app_endpoints(&self, resolver: SharedComputeDriverAppEndpoints) -> Result<()> {
@@ -2352,6 +2612,10 @@ async fn build_compute_runtime(
                 supervisor_recovery_timeout_secs: supervisor_pool
                     .and_then(|pool| pool.recovery_timeout_secs),
                 supervisor_pool_limits,
+                detected: registration.detected.clone(),
+                image_preparation_timeout: Duration::from_secs(u64::from(
+                    config.image_preparation_timeout_seconds,
+                )),
             };
             let (instance, image_updates) = registration
                 .factory
@@ -3043,6 +3307,8 @@ mod tests {
                 },
                 shutdown_rx: shutdown_rx.clone(),
                 shared_supervision: &shared,
+                detected: crate::DetectedSlot::default(),
+                image_preparation_timeout: Duration::from_mins(30),
                 app_endpoint_resolver: &std::sync::OnceLock::new(),
                 supervisor_recovery_timeout_secs: configured,
                 supervisor_pool_limits: limits,
@@ -3911,6 +4177,139 @@ mod tests {
         assert_eq!(registration.name, "detected");
     }
 
+    mod table_detection {
+        use super::*;
+        use crate::{DriverDetectFn, DriverDetection, DriverDetectionContext};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        static LATER_PROBES: AtomicUsize = AtomicUsize::new(0);
+
+        fn invalid(_: &DriverDetectionContext<'_>) -> DriverDetection {
+            DriverDetection::InvalidConfig("unknown key".to_string())
+        }
+
+        fn unavailable(_: &DriverDetectionContext<'_>) -> DriverDetection {
+            DriverDetection::Unavailable("no socket".to_string())
+        }
+
+        fn available(_: &DriverDetectionContext<'_>) -> DriverDetection {
+            DriverDetection::Available(None)
+        }
+
+        fn failed(_: &DriverDetectionContext<'_>) -> DriverDetection {
+            DriverDetection::Failed("crashed".to_string())
+        }
+
+        fn rejects_the_legacy_ca_alias(context: &DriverDetectionContext<'_>) -> DriverDetection {
+            if context.table.contains_key("additional_ca_bundle") {
+                DriverDetection::InvalidConfig("unknown key additional_ca_bundle".to_string())
+            } else {
+                DriverDetection::Available(None)
+            }
+        }
+
+        fn counted(_: &DriverDetectionContext<'_>) -> DriverDetection {
+            LATER_PROBES.fetch_add(1, Ordering::SeqCst);
+            DriverDetection::Available(None)
+        }
+
+        fn registry(
+            candidates: &[(&str, u16, DriverDetectFn)],
+        ) -> super::super::ComputeDriverRegistry {
+            let mut registry = super::super::ComputeDriverRegistry::new();
+            for (name, priority, probe) in candidates {
+                registry
+                    .install(
+                        super::super::ComputeDriverRegistration::new(
+                            *name,
+                            *priority,
+                            None,
+                            TestComputeDriverFactory,
+                        )
+                        .unwrap()
+                        .with_table_detection(*probe),
+                    )
+                    .unwrap();
+            }
+            registry
+        }
+
+        #[test]
+        fn an_invalid_table_or_unavailable_backend_falls_through_to_the_next_candidate() {
+            let registry = registry(&[
+                ("broken", 100, invalid),
+                ("absent", 150, unavailable),
+                ("working", 200, available),
+            ]);
+            let selection = registry.select(None).unwrap();
+            assert_eq!(selection.name(), "working");
+
+            // What was passed over stays available for logging once tracing
+            // is installed.
+            let skipped = selection.skipped();
+            assert_eq!(skipped.len(), 2);
+            assert!(skipped[0].name == "broken" && skipped[0].invalid_config);
+            assert!(skipped[1].name == "absent" && !skipped[1].invalid_config);
+        }
+
+        #[test]
+        fn candidates_after_the_first_available_one_are_not_started() {
+            LATER_PROBES.store(0, Ordering::SeqCst);
+            let registry = registry(&[("first", 100, available), ("later", 200, counted)]);
+            assert_eq!(registry.select(None).unwrap().name(), "first");
+            assert_eq!(LATER_PROBES.load(Ordering::SeqCst), 0);
+        }
+
+        #[test]
+        fn the_error_lists_every_candidates_reason() {
+            let registry = registry(&[("broken", 100, invalid), ("absent", 200, unavailable)]);
+            let error = registry.select(None).unwrap_err().to_string();
+            assert!(
+                error.contains("broken: invalid configuration: unknown key"),
+                "{error}"
+            );
+            assert!(error.contains("absent: no socket"), "{error}");
+        }
+
+        #[test]
+        fn a_crash_stops_startup_instead_of_falling_through() {
+            let registry = registry(&[("crashy", 100, failed), ("working", 200, available)]);
+            let error = registry.select(None).unwrap_err().to_string();
+            assert!(
+                error.contains("crashy") && error.contains("crashed"),
+                "{error}"
+            );
+        }
+
+        #[test]
+        fn a_legacy_key_is_normalized_in_a_copy_before_the_driver_sees_the_table() {
+            let file: crate::config_file::ConfigFile = toml::from_str(
+                "[openshell]\nversion = 2\n[openshell.drivers.podman]\nadditional_ca_bundle = \"/etc/ca.pem\"\n",
+            )
+            .unwrap();
+            let registry = registry(&[("podman", 100, rejects_the_legacy_ca_alias)]);
+
+            let selection = registry
+                .select_with_file(None, Some(&file), "info")
+                .expect("the alias is moved out of the table the driver receives");
+
+            assert_eq!(selection.name(), "podman");
+            // The caller's configuration is untouched.
+            assert!(
+                file.openshell.drivers["podman"]
+                    .as_table()
+                    .unwrap()
+                    .contains_key("additional_ca_bundle")
+            );
+        }
+
+        #[test]
+        fn a_named_driver_is_never_probed() {
+            let registry = registry(&[("broken", 100, invalid)]);
+            assert_eq!(registry.select(Some("broken")).unwrap().name(), "broken");
+        }
+    }
+
     #[test]
     fn registry_detection_reports_available_drivers_in_priority_order() {
         DETECTION_PROBE_ORDER.lock().unwrap().clear();
@@ -3949,7 +4348,7 @@ mod tests {
             )
             .unwrap();
 
-        let detection = registry.detect();
+        let detection = registry.detect(None, "info");
         assert_eq!(detection.selected(), Some("second"));
         assert_eq!(
             detection

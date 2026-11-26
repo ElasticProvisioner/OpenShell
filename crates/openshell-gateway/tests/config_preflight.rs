@@ -27,6 +27,16 @@ impl Fixture {
             config,
         };
         fixture.write_config(Some("vm"));
+        // The driver's own `preflight` validates its table; it contacts no
+        // backend and creates no state. The fixture records how it was run.
+        let invocations = fixture.root.path().join("driver-invocations");
+        fixture.tool(
+            "openshell-driver-vm",
+            &format!(
+                "echo \"$1\" >> '{}'\nwhile read -r _; do :; done\ntest \"$1\" = preflight",
+                invocations.display()
+            ),
+        );
         for name in ["mke2fs", "debugfs", "e2fsck"] {
             fixture.tool(name, &format!(
                 "test \"$1\" = -V || exit 64\ntest \"$#\" = 1 || exit 65\nread ignored && exit 66\ntest \"$PREFLIGHT_TEST_ENV\" = inherited || exit 67\necho '{name} 1.47.4' >&2"
@@ -41,15 +51,22 @@ impl Fixture {
         // TOML serialization preserves quotes and escapes in the fixture path.
         let state_dir = toml::Value::try_from(self.root.path().join("vm-state"))
             .expect("serialize VM state directory");
+        let driver_dir = toml::Value::try_from(&self.tools).expect("serialize driver directory");
         fs::write(&self.config, format!(
-            "[openshell]\nversion = 2\n[openshell.gateway]\ndisable_tls = true\n{selector}[openshell.drivers.vm]\nbootstrap_image = 'unreachable.invalid/vm:must-not-pull'\nstate_dir = {state_dir}\n"
+            "[openshell]\nversion = 2\n[openshell.gateway]\ndisable_tls = true\ndriver_dir = {driver_dir}\n{selector}[openshell.drivers.vm]\nbootstrap_image = 'unreachable.invalid/vm:must-not-pull'\nstate_dir = {state_dir}\n"
         )).expect("gateway configuration");
     }
 
     fn tool(&self, name: &str, body: &str) {
+        // Write and close a temporary file, then rename it into place. A
+        // script another test's fork could still hold open for writing fails
+        // to execute with ETXTBSY.
         let path = self.tools.join(name);
-        fs::write(&path, format!("#!/bin/sh\n{body}\n")).expect("tool fixture");
-        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).expect("executable fixture");
+        let temporary = self.tools.join(format!("{name}.tmp"));
+        fs::write(&temporary, format!("#!/bin/sh\n{body}\n")).expect("tool fixture");
+        fs::set_permissions(&temporary, fs::Permissions::from_mode(0o755))
+            .expect("executable fixture");
+        fs::rename(temporary, path).expect("install fixture");
     }
 
     fn command(&self, replay: &[&str]) -> tokio::process::Command {
@@ -130,8 +147,10 @@ async fn local_vm_reports_tools_without_starting_driver_or_creating_state() {
             "{report}"
         );
     }
-    // PATH contains only the filesystem fixtures, never a VM driver binary.
-    assert!(!fixture.tools.join("openshell-driver-vm").exists());
+    // The gateway ran the driver only to check its table, never to serve.
+    let invocations = fs::read_to_string(fixture.root.path().join("driver-invocations"))
+        .expect("the driver checked its table");
+    assert_eq!(invocations.trim(), "preflight");
 }
 
 #[tokio::test]
@@ -217,7 +236,9 @@ async fn signals_stop_probe_wrapper_and_descendants_before_cli_exit() {
             .expect("preflight process");
         let pid =
             Pid::from_raw(i32::try_from(child.id().expect("gateway PID")).expect("valid PID"));
-        tokio::time::timeout(Duration::from_secs(5), async {
+        // Startup runs the driver's own `preflight` before the host tools,
+        // which takes a moment longer when several gateways start at once.
+        tokio::time::timeout(Duration::from_secs(15), async {
             while !ready.exists() {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
@@ -270,6 +291,11 @@ async fn vm_table_without_selection_does_not_probe_tools() {
 async fn unrelated_driver_does_not_require_vm_tools() {
     let fixture = Fixture::new();
     fixture.tool("mke2fs", "exit 42");
+    // Docker validates its own table through its `preflight` command.
+    fixture.tool(
+        "openshell-driver-docker",
+        "while read -r _; do :; done\ntest \"$1\" = preflight",
+    );
     let output = fixture.run(&["--compute-driver", "docker"]).await;
     assert!(output.status.success(), "{}", combined(&output));
     assert!(!combined(&output).contains("VM host tool"));

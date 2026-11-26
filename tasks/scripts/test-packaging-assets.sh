@@ -89,6 +89,16 @@ assert_contains "$spec" 'ExecStartPre=/usr/bin/openshell-gateway config prefligh
 assert_contains "$spec" '%package prover'
 assert_contains "$spec" '%files prover'
 assert_contains "$spec" '%{_bindir}/%{name}-prover'
+assert_contains "$spec" 'test -x "${OPENSHELL_PREBUILT_BINARIES_DIR}/openshell-driver-podman"'
+assert_contains "$spec" 'test -x "${OPENSHELL_PREBUILT_BINARIES_DIR}/openshell-driver-docker"'
+assert_contains "$spec" '%{_libexecdir}/%{name}/%{name}-driver-podman'
+assert_contains "$spec" '%{_libexecdir}/%{name}/%{name}-driver-docker'
+assert_contains "$ROOT/.github/workflows/build-binaries-linux.yml" 'PACKAGE: openshell-driver-podman'
+assert_contains "$ROOT/.github/workflows/build-binaries-linux.yml" 'PACKAGE: openshell-driver-docker'
+assert_contains "$ROOT/.github/workflows/deb-package.yml" 'OPENSHELL_DRIVER_PODMAN_BINARY='
+assert_contains "$ROOT/.github/workflows/deb-package.yml" 'OPENSHELL_DRIVER_DOCKER_BINARY='
+assert_contains "$ROOT/.github/workflows/build-rpm.yml" 'openshell-driver-podman-${{ inputs.gateway-target }}'
+assert_contains "$ROOT/.github/workflows/build-rpm.yml" 'openshell-driver-docker-${{ inputs.gateway-target }}'
 assert_not_contains "$spec" '%%S/openshell/tls'
 
 # Installed-package qualification must select the candidate trusted runtime
@@ -223,7 +233,7 @@ assert_contains "$snap_publish_workflow" 'component_args+=(--component "${compon
 assert_contains "$snap_publish_workflow" 'group: snap-publish-${{ inputs.upload-channel }}-${{ matrix.arch }}'
 assert_contains "$snap_publish_workflow" 'cancel-in-progress: false'
 assert_contains "$snap_publish_workflow" 'queue: max'
-assert_contains "$snapcraft" 'for bin in openshell openshell-prover openshell-gateway openshell-sandbox openshell-gateway-wrapper; do'
+assert_contains "$snapcraft" 'for bin in openshell openshell-prover openshell-gateway openshell-driver-docker openshell-sandbox openshell-gateway-wrapper; do'
 assert_contains "$snapcraft" '"$CRAFT_PART_INSTALL/bin/openshell-prover"'
 if ! awk '
   /^  prover:$/ { in_prover = 1; next }
@@ -271,6 +281,8 @@ assert_contains "$snap_install_docs" 'tls-backup-$(date +%s%N)'
 assert_contains "$snap_install_docs" "sudo snap set openshell gateway-mode=user"
 assert_contains "$snap_install_docs" "sudo snap set openshell gateway-mode=system"
 assert_contains "$snapcraft" "gateway-mode=disable"
+assert_contains "$snapcraft" 'libexec/openshell/openshell-driver-docker'
+assert_contains "$ROOT/.github/workflows/snap-package.yml" 'openshell-driver-docker-${{ matrix.rust_arch }}-unknown-linux-gnu'
 assert_not_contains "$snap_install_docs" "snap services --user"
 assert_contains "$snap_canary" "install.sh | sh"
 assert_contains "$snap_canary" "ubuntu-snap-system-docker:"
@@ -298,7 +310,7 @@ if command -v dpkg-deb >/dev/null 2>&1; then
   package_work=$(mktemp -d "${TMPDIR:-/tmp}/openshell-package-assets.XXXXXX")
   trap 'rm -rf "$package_work"' EXIT
   mkdir -p "$package_work/bin" "$package_work/output"
-  for binary in openshell openshell-gateway openshell-prover openshell-driver-vm; do
+  for binary in openshell openshell-gateway openshell-prover openshell-driver-vm openshell-driver-podman openshell-driver-docker; do
     printf '#!/bin/sh\nexit 0\n' >"$package_work/bin/$binary"
     chmod +x "$package_work/bin/$binary"
   done
@@ -306,6 +318,8 @@ if command -v dpkg-deb >/dev/null 2>&1; then
     OPENSHELL_GATEWAY_BINARY="$package_work/bin/openshell-gateway" \
     OPENSHELL_PROVER_BINARY="$package_work/bin/openshell-prover" \
     OPENSHELL_DRIVER_VM_BINARY="$package_work/bin/openshell-driver-vm" \
+    OPENSHELL_DRIVER_PODMAN_BINARY="$package_work/bin/openshell-driver-podman" \
+    OPENSHELL_DRIVER_DOCKER_BINARY="$package_work/bin/openshell-driver-docker" \
     OPENSHELL_DEB_VERSION=0.0.0 \
     OPENSHELL_DEB_ARCH=amd64 \
     OPENSHELL_OUTPUT_DIR="$package_work/output" \
@@ -322,6 +336,13 @@ if command -v dpkg-deb >/dev/null 2>&1; then
     echo "FAIL: package-deb did not stage openshell-prover" >&2
     exit 1
   fi
+  for driver in openshell-driver-vm openshell-driver-podman openshell-driver-docker; do
+    if ! dpkg-deb --fsys-tarfile "$package_work/output/openshell_0.0.0_amd64.deb" \
+      | tar -tf - | grep -x "./usr/libexec/openshell/$driver" >/dev/null; then
+      echo "FAIL: package-deb did not stage $driver" >&2
+      exit 1
+    fi
+  done
 else
   echo "SKIP: dpkg-deb unavailable; Debian artifact staging requires its assigned lane"
 fi

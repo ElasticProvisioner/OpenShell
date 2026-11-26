@@ -500,10 +500,10 @@ fi
 
 e2e_build_gateway_binaries "${ROOT}" TARGET_DIR GATEWAY_BIN CLI_BIN
 export OPENSHELL_BIN="${CLI_BIN}"
-if [ "${OPENSHELL_E2E_EXTERNAL_COMPUTE_DRIVER:-0}" = "1" ]; then
-  e2e_build_external_driver \
-    "${ROOT}" openshell-driver-podman openshell-driver-podman DRIVER_BIN
-fi
+# A standalone lane starts the driver itself. Otherwise the gateway launches
+# it, so build it (or use the prebuilt one) and point the gateway at it.
+e2e_build_external_driver \
+  "${ROOT}" openshell-driver-podman openshell-driver-podman DRIVER_BIN
 
 SUPERVISOR_IMAGE="$(resolve_podman_supervisor_image)"
 ensure_podman_supervisor_image "${SUPERVISOR_IMAGE}"
@@ -600,6 +600,21 @@ if [ "${ADDITIONAL_CA_MODE}" = "1" ]; then
     END { if (!inserted) exit 42 }
   ' "${GATEWAY_CONFIG}" >"${CONFIG_WITH_ADDITIONAL_CA}"
   mv "${CONFIG_WITH_ADDITIONAL_CA}" "${GATEWAY_CONFIG}"
+fi
+if [ "${OPENSHELL_E2E_EXTERNAL_COMPUTE_DRIVER:-0}" != "1" ]; then
+  # The gateway launches the Podman driver from this directory.
+  CONFIG_WITH_DRIVER_DIR="${GATEWAY_CONFIG}.driver-dir"
+  awk -v driver_dir="$(e2e_podman_toml_string "$(dirname "${DRIVER_BIN}")")" '
+    !inserted && $0 == "[openshell.gateway]" {
+      print
+      print "driver_dir = " driver_dir
+      inserted = 1
+      next
+    }
+    { print }
+    END { if (!inserted) exit 42 }
+  ' "${GATEWAY_CONFIG}" >"${CONFIG_WITH_DRIVER_DIR}"
+  mv "${CONFIG_WITH_DRIVER_DIR}" "${GATEWAY_CONFIG}"
 fi
 EXTERNAL_DRIVER_GRPC_ENDPOINT="https://127.0.0.1:${HOST_PORT}"
 EXTERNAL_DRIVER_HEALTH_CHECK_INTERVAL_SECS=10

@@ -1,6 +1,6 @@
 # openshell-driver-podman
 
-The Podman compute driver runs inside the gateway and uses the native libpod
+The Podman compute driver runs as a subprocess of the gateway and uses the native libpod
 REST API over a Unix socket. Each sandbox has two independent containers:
 
 - `openshell-sandbox` owns the agent process in the workload container.
@@ -164,3 +164,16 @@ When `[openshell.gateway.otlp.agent]` is enabled, the driver sets
 `OPENSHELL_OTLP_AGENT_PROTOCOL` for a non-gRPC collector, which starts the
 agent trace relay. On Podman Machine it rewrites a loopback agent endpoint to
 the desktop host, as it does for the supervisor's trace endpoint.
+
+## Launched mode
+
+```text
+openshell-driver-podman serve --bind-socket <path> --expected-peer-pid <pid> --log-level <level>   < table.toml
+openshell-driver-podman preflight                                                                  < table.toml
+```
+
+The gateway passes the `[openshell.drivers.podman]` table on stdin and gateway metadata in a `Configure` call (`proto/driver_launch.proto`). `settings_from_table` in `src/config.rs` is the only place the table is parsed and validated.
+
+`serve` resolves the Podman socket from `OPENSHELL_PODMAN_SOCKET`, `socket_path`, or discovery, and pings it before it binds. The ping gets 20 seconds, so the gateway, which waits 30 seconds for a driver to start, receives the report instead of killing the driver. It exits 69 when Podman is not reachable and 78 when the table is invalid. Until `Configure` succeeds, `ComputeDriver` calls return `UNAVAILABLE` and the driver creates no networks, volumes, or secrets. `preflight` validates the table without contacting Podman.
+
+The gateway port and name, trusted runtime images, and OTLP settings come from `Configure`. Trusted runtime images from the gateway's environment take precedence over the table, as they did when the driver ran in process. The gateway supplies `gateway_port` and the CA, so the table rejects `gateway_port`, `guest_tls_ca` and the admission keys (`allow_driver_config`, `resource_admission`), which the gateway delivers in `Configure`. `grpc_endpoint` remains an optional override, and an `https://` endpoint needs the gateway CA.

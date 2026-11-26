@@ -19,6 +19,8 @@ def test_generate_homebrew_formula_uses_channel_urls_and_exact_version(
             [
                 "a" * 64 + "  openshell-aarch64-apple-darwin.tar.gz",
                 "b" * 64 + "  openshell-driver-vm-aarch64-apple-darwin.tar.gz",
+                "c" * 64 + "  openshell-driver-podman-aarch64-apple-darwin.tar.gz",
+                "f" * 64 + "  openshell-driver-docker-aarch64-apple-darwin.tar.gz",
             ]
         )
         + "\n",
@@ -55,6 +57,20 @@ def test_generate_homebrew_formula_uses_channel_urls_and_exact_version(
         "https://github.com/ai-openshell/openshell/releases/download/"
         "v0.1.0-pre.3/openshell-driver-vm-aarch64-apple-darwin.tar.gz"
     ) in formula
+    assert (
+        "https://github.com/ai-openshell/openshell/releases/download/"
+        "v0.1.0-pre.3/openshell-driver-podman-aarch64-apple-darwin.tar.gz"
+    ) in formula
+    assert 'sha256 "' + "c" * 64 + '"' in formula
+    assert 'resource("openshell-driver-podman").stage' in formula
+    assert 'libexec.install "openshell-driver-podman"' in formula
+    assert (
+        "https://github.com/ai-openshell/openshell/releases/download/"
+        "v0.1.0-pre.3/openshell-driver-docker-aarch64-apple-darwin.tar.gz"
+    ) in formula
+    assert 'sha256 "' + "f" * 64 + '"' in formula
+    assert 'resource("openshell-driver-docker").stage' in formula
+    assert 'libexec.install "openshell-driver-docker"' in formula
     assert 'version "0.1.0-pre.3"' in formula
     assert 'sha256 "' + "b" * 64 + '"' in formula
     assert (

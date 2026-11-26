@@ -190,7 +190,7 @@ parts:
       set -euo pipefail
 
       MISSING=()
-      for bin in openshell openshell-prover openshell-gateway openshell-sandbox openshell-gateway-wrapper; do
+      for bin in openshell openshell-prover openshell-gateway openshell-driver-docker openshell-sandbox openshell-gateway-wrapper; do
         if [ ! -f "$CRAFT_PART_SRC/$bin" ]; then
           MISSING+=("$bin")
         fi
@@ -212,6 +212,10 @@ parts:
         "$CRAFT_PART_INSTALL/bin/openshell-prover"
       install -D -m 0755 "$CRAFT_PART_SRC/openshell-gateway" \
         "$CRAFT_PART_INSTALL/bin/openshell-gateway"
+      # The gateway launches the Docker driver as a subprocess. It finds it
+      # in $SNAP/libexec/openshell, next to the gateway's prefix.
+      install -D -m 0755 "$CRAFT_PART_SRC/openshell-driver-docker" \
+        "$CRAFT_PART_INSTALL/libexec/openshell/openshell-driver-docker"
       install -D -m 0755 "$CRAFT_PART_SRC/openshell-sandbox" \
         "$CRAFT_PART_INSTALL/bin/openshell-sandbox"
       install -D -m 0755 "$CRAFT_PART_SRC/openshell-gateway-wrapper" \

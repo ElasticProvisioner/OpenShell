@@ -128,6 +128,38 @@ jobs:
     timeout-minutes: 60
     steps: *build_steps
 
+  podman-driver:
+    name: openshell-driver-podman (${{ matrix.triple }})
+    env:
+      PACKAGE: openshell-driver-podman
+      BINARY: openshell-driver-podman
+    strategy:
+      matrix:
+        include:
+          - triple: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+          - triple: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps: *build_steps
+
+  docker-driver:
+    name: openshell-driver-docker (${{ matrix.triple }})
+    env:
+      PACKAGE: openshell-driver-docker
+      BINARY: openshell-driver-docker
+    strategy:
+      matrix:
+        include:
+          - triple: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+          - triple: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps: *build_steps
+
   vm-init:
     name: openshell-vm-init (${{ matrix.triple }})
     env:

@@ -473,7 +473,11 @@ fn prepare_server_config_with_drivers(
     let legacy_compute_driver_env_seen = resolve_legacy_driver_selector_env(args)?;
     normalize_compute_driver_socket_args(args)?;
     let compute_driver = compute_drivers
-        .select(args.compute_driver.as_deref())
+        .select_with_file(
+            args.compute_driver.as_deref(),
+            file.as_ref(),
+            &args.log_level,
+        )
         .map_err(|error| miette::miette!("{error}"))?;
     if let Some(file) = file.as_mut() {
         config_file::normalize_legacy_podman_ca_bundle(file, compute_driver.name())
@@ -1006,6 +1010,23 @@ async fn run_from_args(
         warn!(
             "openshell.drivers.podman.additional_ca_bundle is deprecated; use openshell.supervisor.network.additional_ca_bundle"
         );
+    }
+    // Auto-detection ran before tracing was installed, so report now which
+    // candidates it passed over.
+    for skipped in prepared.compute_driver.skipped() {
+        if skipped.invalid_config {
+            warn!(
+                driver = %skipped.name,
+                reason = %skipped.reason,
+                "ignoring compute driver whose configuration is invalid"
+            );
+        } else {
+            info!(
+                driver = %skipped.name,
+                reason = %skipped.reason,
+                "compute driver passed over by auto-detection"
+            );
+        }
     }
     if let Some(bundle) = prepared.network_trust.as_ref() {
         info!(

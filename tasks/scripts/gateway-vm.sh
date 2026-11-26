@@ -333,6 +333,7 @@ version = 2
 [openshell.gateway]
 name = "${GATEWAY_NAME}"
 compute_driver = "vm"
+driver_dir = "${DRIVER_DIR}"
 disable_tls = ${DISABLE_TLS}
 
 [openshell.gateway.auth]
@@ -348,7 +349,6 @@ gateway_id = "${GATEWAY_NAME}"
 default_image = "${SANDBOX_IMAGE}"
 bootstrap_image = "${VM_BOOTSTRAP_IMAGE}"
 grpc_endpoint = "${GRPC_ENDPOINT}"
-driver_dir = "${DRIVER_DIR}"
 state_dir = "${VM_DRIVER_STATE_DIR}"
 EOF
 

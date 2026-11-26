@@ -29,6 +29,8 @@ jobs:
     env:
       COMPONENT: gateway
       BINARY: openshell-gateway
+      # The gateway image carries the Docker and Podman drivers it launches.
+      EXTRA_PATTERN: openshell-driver-{docker,podman}
       TARGET_SUFFIX: unknown-linux-gnu
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -42,6 +44,7 @@ jobs:
         with:
           component: ${{ env.COMPONENT }}
           binary: ${{ env.BINARY }}
+          extra-pattern: ${{ env.EXTRA_PATTERN }}
           target-suffix: ${{ env.TARGET_SUFFIX }}
           image-tag: ${{ inputs.image-tag || github.sha }}
           push: ${{ inputs.push-images }}
