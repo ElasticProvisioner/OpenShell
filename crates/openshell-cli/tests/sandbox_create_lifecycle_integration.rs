@@ -58,6 +58,8 @@ fn selected_workspace(
     }
 }
 
+const PUBLISHED_HOST_KEY: &str = "SHA256:ZkAslGjFiUHdGf/WUL8rQvkib4PTvQatUV0OUQSncCA";
+
 #[derive(Clone, Default)]
 struct SandboxState {
     /// Make `ListProviderProfiles` fail while every other RPC keeps working,
@@ -339,6 +341,7 @@ impl OpenShell for TestOpenShell {
                 workspace: String::new(),
                 deletion_time: None,
             }),
+            host_key_fingerprint: PUBLISHED_HOST_KEY.to_string(),
             ..Sandbox::default()
         };
         sandbox.set_phase(phase as i32);
@@ -1099,6 +1102,22 @@ fn install_executable_script(
 
 fn install_fake_ssh(dir: &TempDir) -> std::path::PathBuf {
     install_executable_script(dir, "ssh", "#!/bin/sh\nexit 0\n")
+}
+
+/// A fake `ssh` that answers the workspace probe and records its arguments,
+/// one per line, in the returned file. Also installs a fake `code`.
+fn install_recording_ssh(dir: &TempDir) -> std::path::PathBuf {
+    let arguments = dir.path().join("ssh-arguments");
+    install_executable_script(
+        dir,
+        "ssh",
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nprintf '/sandbox\\n'\n",
+            arguments.display()
+        ),
+    );
+    install_executable_script(dir, "code", "#!/bin/sh\nexit 0\n");
+    arguments
 }
 
 fn install_fake_pgrep_no_match(dir: &TempDir) -> std::path::PathBuf {
@@ -3183,6 +3202,8 @@ async fn ssh_profile_credentials_follow_the_selected_endpoint() {
             .env_remove("OPENSHELL_GATEWAY")
             .env_remove("OPENSHELL_GATEWAY_ENDPOINT")
             .env("XDG_CONFIG_HOME", xdg.path())
+            // The saved profiles below name no known-hosts file.
+            .env("OPENSHELL_SSH_REQUIRE_HOST_KEY", "0")
             .env("OPENSHELL_TELEMETRY_ENABLED", "false");
         command
     };
@@ -3318,6 +3339,8 @@ async fn selected_ssh_profile_wins_over_an_active_profile_on_the_same_host() {
             .env("OPENSHELL_GATEWAY", "openshell")
             .env("OPENSHELL_GATEWAY_ENDPOINT", &endpoint)
             .env("XDG_CONFIG_HOME", xdg.path())
+            // The saved profiles above name no known-hosts file.
+            .env("OPENSHELL_SSH_REQUIRE_HOST_KEY", "0")
             .env("OPENSHELL_TELEMETRY_ENABLED", "false")
             .output()
             .await
@@ -3381,6 +3404,38 @@ async fn sandbox_forward_background_tracks_owned_child_when_pid_discovery_fails(
                 wait_for_process_exit(record.pid, Duration::from_secs(2)).await,
                 "tracked fake forward process should exit after stop"
             );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn editor_connect_makes_ssh_trust_only_the_pin_of_the_sandbox() {
+    let server = run_server().await;
+    let fake_ssh_dir = helpers::tempdir().unwrap();
+    let xdg_dir = helpers::tempdir().unwrap();
+
+    test_env(&fake_ssh_dir, &xdg_dir)
+        .run_async(async {
+            let tls = test_tls(&server);
+            let ssh_arguments = install_recording_ssh(&fake_ssh_dir);
+            let pin = xdg_dir
+                .path()
+                .join("openshell/known_hosts/openshell/openshell-pinned.default");
+
+            run::sandbox_connect_editor(
+                &server.endpoint,
+                "openshell",
+                "pinned",
+                run::Editor::Vscode,
+                &tls,
+                "default",
+            )
+            .await
+            .unwrap();
+
+            let ssh_arguments = fs::read_to_string(ssh_arguments).unwrap();
+            let expected = format!("\nUserKnownHostsFile=\"{}\"\n", pin.display());
+            assert!(ssh_arguments.contains(&expected), "{ssh_arguments}");
         })
         .await;
 }

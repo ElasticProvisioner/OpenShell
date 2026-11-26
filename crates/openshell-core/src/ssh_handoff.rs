@@ -14,7 +14,7 @@ use unix as ipc;
 use windows as ipc;
 
 use crate::forward::{
-    build_proxy_command, supports_direct_ssh, validate_ssh_sandbox_id,
+    SandboxProxyCommand, build_proxy_command, supports_direct_ssh, validate_ssh_sandbox_id,
     validate_ssh_session_response,
 };
 use crate::metadata::ObjectId;
@@ -23,6 +23,7 @@ use crate::proto::{
     Sandbox, SandboxResponse, open_shell_client::OpenShellClient, workspace_selector,
 };
 use crate::replica_routing::{owner_replica, with_owner_hint};
+use crate::ssh_host_key::{HostKeyCheck, SandboxSshTarget};
 use crate::time::{duration_from_std, duration_to_std};
 use miette::{IntoDiagnostic, Result};
 use prost::Message;
@@ -79,6 +80,9 @@ pub struct SshTarget {
     pub id: String,
     /// Capability from the selected sandbox's `GetSandbox` reply. Look it up if unknown.
     pub direct_ssh: Option<bool>,
+    /// SSH host key fingerprint from the same reply. Empty when the gateway
+    /// published none.
+    pub host_key_fingerprint: String,
     pub replica: Option<String>,
     pub gateway_insecure: bool,
     pub cleanup: SshCleanup,
@@ -94,6 +98,20 @@ pub struct RelayGrant {
     pub gateway_name: String,
     #[prost(string, optional, tag = "4")]
     pub replica: Option<String>,
+    /// Absent when the issuer predates host-key verification.
+    #[prost(message, optional, tag = "6")]
+    pub host_key: Option<HostKeyHandoff>,
+}
+
+/// The host key the proxy must see, and the file in which it pins that key
+/// for the issuer's `ssh`.
+#[derive(Message)]
+pub struct HostKeyHandoff {
+    /// A fingerprint, or `unverified`.
+    #[prost(string, tag = "1")]
+    pub expectation: String,
+    #[prost(string, tag = "2")]
+    pub known_hosts: String,
 }
 
 #[derive(prost::Oneof)]
@@ -144,7 +162,7 @@ impl RelayGrant {
 }
 
 pub struct PreparedProxy {
-    command: String,
+    command: SandboxProxyCommand,
     cancel: oneshot::Sender<()>,
     cleanup: tokio::task::JoinHandle<Result<Option<Duration>>>,
 }
@@ -176,6 +194,7 @@ impl SshTarget {
             workspace: workspace.into(),
             id: id.into(),
             direct_ssh: None,
+            host_key_fingerprint: String::new(),
             replica: None,
             gateway_insecure: false,
             cleanup: SshCleanup::default(),
@@ -206,6 +225,8 @@ impl SshTarget {
             return Err(SshAdmissionError::CapabilityLost.into());
         }
         self.direct_ssh = Some(advertised);
+        self.host_key_fingerprint
+            .clone_from(&sandbox.host_key_fingerprint);
         self.replica =
             owner_replica(response).and_then(|owner| owner.to_str().ok().map(str::to_owned));
         Ok(sandbox)
@@ -224,6 +245,16 @@ impl SshTarget {
                 .map_err(SshAdmissionError::Rpc)?;
             target.to_mut().observe_lookup(&response)?;
         }
+        // Before any session is created, so that a refusal leaves no grant.
+        let host_key = HostKeyCheck::for_target(
+            &target.host_key_fingerprint,
+            &SandboxSshTarget {
+                gateway: &self.gateway_name,
+                workspace: &self.workspace,
+                sandbox: &self.name,
+            },
+        )
+        .into_diagnostic()?;
         let authorization = if target.direct_ssh == Some(true) {
             RelayAuthorization::Direct(DirectSshRelay {
                 sandbox_id: target.id.clone(),
@@ -265,6 +296,7 @@ impl SshTarget {
             endpoint: target.endpoint.clone(),
             gateway_name: target.gateway_name.clone(),
             replica: target.replica.clone(),
+            host_key: Some(host_key.handoff()),
         };
         let setup = || {
             if grant.validate()? != self.id {
@@ -339,7 +371,7 @@ impl SshTarget {
             }
         });
         Ok(PreparedProxy {
-            command,
+            command: SandboxProxyCommand::new(command, host_key),
             cancel,
             cleanup,
         })
@@ -360,7 +392,7 @@ pub async fn revoke_grant<I: Interceptor + Clone>(mut client: Client<I>, token: 
 }
 
 impl PreparedProxy {
-    pub fn command(&self) -> &str {
+    pub fn command(&self) -> &SandboxProxyCommand {
         &self.command
     }
 
@@ -408,6 +440,7 @@ pub async fn receive(handle: &str) -> Result<(RelayGrant, impl AsyncRead + Async
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_environment::{Environment, fixture_dir};
 
     #[test]
     fn transport_loss_requires_a_local_cause_for_ambiguous_statuses() {
@@ -446,44 +479,99 @@ mod tests {
         assert_eq!(target.direct_ssh, None);
     }
 
-    #[tokio::test]
-    async fn direct_handoff_observes_admission_without_session_rpcs() {
-        let endpoint = "http://127.0.0.1:0";
-        let client = OpenShellClient::with_interceptor(
-            Channel::from_static(endpoint).connect_lazy(),
-            |_| panic!("observed direct handoff issued an unexpected gateway RPC"),
-        );
+    const FINGERPRINT: &str = "SHA256:ZkAslGjFiUHdGf/WUL8rQvkib4PTvQatUV0OUQSncCA";
+
+    fn direct_target(endpoint: &str) -> SshTarget {
         let mut target = SshTarget::new(endpoint, "gateway", "box", "team", "id-1");
         target.direct_ssh = Some(true);
-        target.gateway_insecure = true;
-        target.replica = Some("owner".into());
+        target.host_key_fingerprint = FINGERPRINT.into();
+        target
+    }
 
-        let timeout = Duration::from_nanos(2_500_003);
-        let proxy = target.prepare(client.clone(), Some(timeout)).await.unwrap();
-        let handle = proxy.command().rsplit_once(' ').unwrap().1.to_owned();
-        let ((), admitted) = proxy
-            .run_with_admission(async {
-                let (grant, mut peer) = receive(&handle).await?;
-                let Some(RelayAuthorization::Direct(direct)) = grant.authorization else {
-                    panic!("missing direct SSH target");
-                };
-                assert_eq!(direct.sandbox_id, "id-1");
-                assert!(direct.gateway_insecure);
-                assert_eq!(direct.registration_timeout()?, Some(timeout));
-                assert_eq!(grant.endpoint, endpoint);
-                assert_eq!(grant.gateway_name, "gateway");
-                assert_eq!(grant.replica.as_deref(), Some("owner"));
-                peer.write_u8(1).await.into_diagnostic()?;
-                assert_eq!(peer.read_u8().await.into_diagnostic()?, 1);
-                Ok(())
+    fn no_rpc_client(
+        endpoint: &'static str,
+    ) -> Client<impl Interceptor + Clone + Send + Sync + 'static> {
+        OpenShellClient::with_interceptor(Channel::from_static(endpoint).connect_lazy(), |_| {
+            panic!("the handoff issued an unexpected gateway RPC")
+        })
+    }
+
+    #[tokio::test]
+    async fn direct_handoff_observes_admission_without_session_rpcs() {
+        let config_home = fixture_dir().unwrap();
+        let known_hosts = config_home
+            .path()
+            .join("openshell/known_hosts/gateway/openshell-box.team");
+        Environment::new()
+            .set("XDG_CONFIG_HOME", config_home.path())
+            .run_async(async {
+                let endpoint = "http://127.0.0.1:0";
+                let client = no_rpc_client(endpoint);
+                let mut target = direct_target(endpoint);
+                target.gateway_insecure = true;
+                target.replica = Some("owner".into());
+
+                let timeout = Duration::from_nanos(2_500_003);
+                let proxy = target.prepare(client.clone(), Some(timeout)).await.unwrap();
+                let handle = proxy
+                    .command()
+                    .as_str()
+                    .rsplit_once(' ')
+                    .unwrap()
+                    .1
+                    .to_owned();
+                let ((), admitted) = proxy
+                    .run_with_admission(async {
+                        let (grant, mut peer) = receive(&handle).await?;
+                        let Some(RelayAuthorization::Direct(direct)) = grant.authorization else {
+                            panic!("missing direct SSH target");
+                        };
+                        assert_eq!(direct.sandbox_id, "id-1");
+                        assert!(direct.gateway_insecure);
+                        assert_eq!(direct.registration_timeout()?, Some(timeout));
+                        assert_eq!(grant.endpoint, endpoint);
+                        assert_eq!(grant.gateway_name, "gateway");
+                        assert_eq!(grant.replica.as_deref(), Some("owner"));
+                        let host_key = grant.host_key.unwrap();
+                        assert_eq!(host_key.expectation, FINGERPRINT);
+                        assert_eq!(std::path::Path::new(&host_key.known_hosts), known_hosts);
+                        peer.write_u8(1).await.into_diagnostic()?;
+                        assert_eq!(peer.read_u8().await.into_diagnostic()?, 1);
+                        Ok(())
+                    })
+                    .await
+                    .unwrap();
+                assert!(admitted.is_some());
+
+                let proxy = target.prepare(client, None).await.unwrap();
+                let ((), admitted) = proxy.run_with_admission(async { Ok(()) }).await.unwrap();
+                assert!(admitted.is_none());
             })
-            .await
-            .unwrap();
-        assert!(admitted.is_some());
+            .await;
+    }
 
-        let proxy = target.prepare(client, None).await.unwrap();
-        let ((), admitted) = proxy.run_with_admission(async { Ok(()) }).await.unwrap();
-        assert!(admitted.is_none());
+    #[tokio::test]
+    async fn a_sandbox_with_no_published_host_key_gets_no_proxy() {
+        let config_home = fixture_dir().unwrap();
+        Environment::new()
+            .set("XDG_CONFIG_HOME", config_home.path())
+            .remove(crate::ssh_host_key::REQUIRE_HOST_KEY_ENV)
+            .run_async(async {
+                let endpoint = "http://127.0.0.1:0";
+                // A session grant: it must not be created and left behind.
+                let mut target = SshTarget::new(endpoint, "gateway", "box", "team", "id-1");
+                target.direct_ssh = Some(false);
+
+                let Err(refusal) = target.prepare(no_rpc_client(endpoint), None).await else {
+                    panic!("prepared a proxy for an unverified sandbox")
+                };
+
+                assert!(
+                    refusal.to_string().starts_with("SSH refused: "),
+                    "{refusal}"
+                );
+            })
+            .await;
     }
 
     #[tokio::test]

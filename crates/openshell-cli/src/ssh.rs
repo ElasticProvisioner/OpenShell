@@ -13,8 +13,8 @@ use miette::{IntoDiagnostic, Report, Result, WrapErr};
 #[cfg(unix)]
 use nix::sys::signal::Signal;
 use openshell_core::forward::{
-    ForwardSpec, format_gateway_url, resolve_ssh_gateway, sandbox_ssh_args, shell_escape,
-    supports_direct_ssh, validate_ssh_session_response, write_forward_pid,
+    ForwardSpec, SandboxProxyCommand, format_gateway_url, resolve_ssh_gateway, sandbox_ssh_args,
+    shell_escape, supports_direct_ssh, validate_ssh_session_response, write_forward_pid,
 };
 use openshell_core::proto::{
     CreateSshSessionRequest, CreateSshSessionResponse, GetSandboxRequest, SandboxPhase,
@@ -22,6 +22,10 @@ use openshell_core::proto::{
 };
 use openshell_core::ssh_handoff::{
     PreparedProxy, RelayAuthorization, SshAdmissionError, SshCleanup, SshTarget,
+};
+use openshell_core::ssh_host_key::{
+    HostKeyCheck, HostKeyExpectation, HostKeyGate, KnownHostsPin, SandboxSshTarget,
+    host_key_alias as host_alias, permit_unverified,
 };
 use openshell_core::upload::{
     DestinationKind as UploadDestinationKind, ExpectedDestination, UploadPlan,
@@ -110,7 +114,21 @@ struct SshSessionConfig {
 
 impl SshSessionConfig {
     async fn prepare(&self) -> Result<PreparedProxy> {
-        self.target.prepare(self.client.clone(), None).await
+        self.prepare_within(None).await
+    }
+
+    async fn prepare_within(
+        &self,
+        registration_timeout: Option<Duration>,
+    ) -> Result<PreparedProxy> {
+        let proxy = self
+            .target
+            .prepare(self.client.clone(), registration_timeout)
+            .await?;
+        if let Some(warning) = proxy.command().unverified_warning() {
+            eprintln!("{warning}");
+        }
+        Ok(proxy)
     }
 }
 
@@ -128,6 +146,9 @@ async fn ssh_session_config(
         .ok_or_else(|| miette::miette!("gateway name is required to build SSH proxy command"))?;
     let mut target = SshTarget::new(server, gateway_name, name, workspace, sandbox.object_id());
     target.direct_ssh = Some(direct_ssh);
+    target
+        .host_key_fingerprint
+        .clone_from(&sandbox.host_key_fingerprint);
     target.gateway_insecure = tls.gateway_insecure;
     target.replica = replica
         .as_ref()
@@ -140,7 +161,7 @@ async fn ssh_session_config(
     })
 }
 
-fn ssh_base_command(proxy_command: &str) -> Command {
+fn ssh_base_command(proxy_command: &SandboxProxyCommand) -> Command {
     // An explicit environment override wins over the CLI verbosity default.
     let ssh_log_level = std::env::var("OPENSHELL_SSH_LOG_LEVEL").unwrap_or_else(|_| {
         DEFAULT_SSH_LOG_LEVEL
@@ -626,8 +647,7 @@ pub(crate) async fn sandbox_connect_terminal_main(
 ) -> Result<i32> {
     let session = ssh_session_config(server, name, tls, workspace).await?;
     let proxy = session
-        .target
-        .prepare(session.client, Some(TERMINAL_RELAY_REGISTRATION_TIMEOUT))
+        .prepare_within(Some(TERMINAL_RELAY_REGISTRATION_TIMEOUT))
         .await?;
     let command = main_attach_command(&proxy, session.main_terminal);
     proxy.run(wait_for_ssh(command)).await
@@ -767,7 +787,11 @@ async fn run_forward(
 
 /// A forward must stay owned by the process we spawn so it can be reaped or
 /// tracked by PID. User SSH config may otherwise fork it into the background.
-fn ssh_forward_command(proxy_command: &str, sandbox_id: &str, spec: &ForwardSpec) -> Command {
+fn ssh_forward_command(
+    proxy_command: &SandboxProxyCommand,
+    sandbox_id: &str,
+    spec: &ForwardSpec,
+) -> Command {
     let mut command = ssh_base_command(proxy_command);
     command
         .arg("-o")
@@ -1260,7 +1284,7 @@ async fn ssh_tar_upload(
 /// Upload EOF marks a complete archive and the SSH exit status reports
 /// extraction, so the session must stay in the process we spawn. User SSH
 /// config may otherwise fork it into the background.
-fn ssh_upload_command(proxy_command: &str) -> Command {
+fn ssh_upload_command(proxy_command: &SandboxProxyCommand) -> Command {
     let mut command = ssh_base_command(proxy_command);
     command
         .arg("-o")
@@ -1796,6 +1820,10 @@ fn sync_error_is_retryable(error: &Report) -> bool {
         return error.is_retryable();
     }
     let message = format!("{error:?}").to_ascii_lowercase();
+    // A host key refusal names the sandbox, which may hold a word listed below.
+    if message.contains("ssh refused:") {
+        return false;
+    }
     [
         "broken pipe",
         "connection",
@@ -2037,14 +2065,40 @@ async fn lookup_ssh_sandbox(
 }
 
 /// Connect a saved SSH profile to the sandbox selected by this invocation.
+///
+/// `known_hosts` is the pin file the profile also names as its
+/// `UserKnownHostsFile`. A profile without it predates host-key verification
+/// and tells `ssh` to accept any host key: it is refused, unless the user
+/// lets unverified connections go ahead.
 pub async fn sandbox_ssh_proxy_by_name(
     server: &str,
+    gateway_name: &str,
     name: &str,
     tls: &TlsOptions,
     workspace: &str,
+    known_hosts: Option<PathBuf>,
 ) -> Result<()> {
+    if known_hosts.is_none() {
+        eprintln!(
+            "{}",
+            stale_ssh_config_warning(gateway_name, workspace, name)
+        );
+        permit_unverified().into_diagnostic()?;
+    }
     let mut client = grpc_client(server, tls).await?;
     let (sandbox, replica, direct_ssh) = lookup_ssh_sandbox(&mut client, name, workspace).await?;
+    let gate = if let Some(known_hosts) = known_hosts {
+        let expectation =
+            HostKeyExpectation::from_published(&sandbox.host_key_fingerprint).into_diagnostic()?;
+        let pin = KnownHostsPin::at(known_hosts, name, workspace).into_diagnostic()?;
+        let host_key = HostKeyCheck::for_relay(expectation, pin).into_diagnostic()?;
+        if let Some(warning) = host_key.unverified_warning() {
+            eprintln!("{warning}");
+        }
+        Some(host_key.into_gate())
+    } else {
+        None
+    };
     let mut cancellation = ConnectCancellation::new()?;
     if direct_ssh {
         return cancellation
@@ -2058,7 +2112,7 @@ pub async fn sandbox_ssh_proxy_by_name(
                     None,
                 )
                 .await?;
-                relay_ssh_proxy(relay).await
+                relay_ssh_proxy(relay, gate).await
             })
             .await
             .map_err(|_| miette::miette!("SSH proxy interrupted"))?;
@@ -2089,7 +2143,7 @@ pub async fn sandbox_ssh_proxy_by_name(
     openshell_core::ssh_handoff::revoke_grant(client, session.token).await;
     let relay = opened.map_err(|_| miette::miette!("SSH proxy interrupted"))??;
     cancellation
-        .wait(relay_ssh_proxy(relay))
+        .wait(relay_ssh_proxy(relay, gate))
         .await
         .map_err(|_| miette::miette!("SSH proxy interrupted"))?
 }
@@ -2108,6 +2162,18 @@ pub async fn relay_prepared_ssh(
         .map(str::parse)
         .transpose()
         .into_diagnostic()?;
+    let gate = if let Some(host_key) = grant.host_key {
+        let host_key = HostKeyCheck::from_handoff(host_key, name, workspace).into_diagnostic()?;
+        Some(host_key.into_gate())
+    } else {
+        // The `ssh` of such a client accepts any host key.
+        eprintln!(
+            "openshell: warning: the OpenShell client that started this SSH connection predates host-key verification, so the SSH host key is NOT verified.\n\
+             Restart that client (the openshell command or openshell term)."
+        );
+        permit_unverified().into_diagnostic()?;
+        None
+    };
     let direct = matches!(&grant.authorization, Some(RelayAuthorization::Direct(_)));
     let open = async {
         match grant
@@ -2150,9 +2216,9 @@ pub async fn relay_prepared_ssh(
             notify_ssh_issuer(&mut peer, 1).await?;
             if !direct {
                 drop(peer);
-                return relay_ssh_proxy(relay).await;
+                return relay_ssh_proxy(relay, gate).await;
             }
-            relay_ssh_proxy(relay).await
+            relay_ssh_proxy(relay, gate).await
         }
         Err(error) => Err(error),
     };
@@ -2184,7 +2250,11 @@ type SshRelay = (
     tonic::Streaming<TcpForwardFrame>,
 );
 
-async fn relay_ssh_proxy((tx, mut response): SshRelay) -> Result<()> {
+/// Without `gate`, the sandbox's host key is not checked.
+async fn relay_ssh_proxy(
+    (tx, mut response): SshRelay,
+    mut gate: Option<HostKeyGate>,
+) -> Result<()> {
     let stdout = tokio::io::stdout();
 
     // Tokio stdin uses an uncancellable read on the runtime's blocking pool.
@@ -2236,6 +2306,11 @@ async fn relay_ssh_proxy((tx, mut response): SshRelay) -> Result<()> {
             let Some(openshell_core::proto::tcp_forward_frame::Payload::Data(data)) = frame.payload
             else {
                 continue;
+            };
+            let data = match gate.as_mut().map(|gate| gate.push(&data)) {
+                None => data,
+                Some(Ok(released)) => released,
+                Some(Err(refusal)) => return Err(miette::miette!("{refusal}")),
             };
             if data.is_empty() {
                 continue;
@@ -2373,8 +2448,24 @@ async fn open_ssh_stream(
     Ok((tx, response?.into_inner()))
 }
 
-fn host_alias(name: &str, workspace: &str) -> String {
-    format!("openshell-{name}.{workspace}")
+fn stale_ssh_config_warning(gateway: &str, workspace: &str, sandbox: &str) -> String {
+    // A gateway with no saved profile is named by its endpoint.
+    let selector = if gateway.contains("://") {
+        "--gateway-endpoint"
+    } else {
+        "-g"
+    };
+    let openshell = format!(
+        "openshell {selector} {} --workspace {}",
+        shell_escape(gateway),
+        shell_escape(workspace)
+    );
+    let name = shell_escape(sandbox);
+    format!(
+        "openshell: warning: this SSH config entry for sandbox '{sandbox}' (workspace '{workspace}') predates host-key verification, so the SSH host key is NOT verified.\n\
+         Regenerate it: {openshell} sandbox connect {name} --editor vscode\n\
+         Or replace the entry with the output of: {openshell} sandbox ssh-config {name}"
+    )
 }
 
 fn render_ssh_config(gateway: &str, name: &str, workspace: &str) -> Result<String> {
@@ -2401,16 +2492,31 @@ fn render_ssh_config(gateway: &str, name: &str, workspace: &str) -> Result<Strin
             ));
         }
     };
+    let pin = KnownHostsPin::for_target(&SandboxSshTarget {
+        gateway: &target,
+        workspace,
+        sandbox: name,
+    })
+    .into_diagnostic()?;
     let proxy_cmd = format!(
-        "{} ssh-proxy {selector} {} --name {} --workspace {}",
+        "{} ssh-proxy {selector} {} --name {} --workspace {} --known-hosts {}",
         shell_escape(&exe.to_string_lossy()).replace('%', "%%"),
         shell_escape(&target).replace('%', "%%"),
         shell_escape(name).replace('%', "%%"),
         shell_escape(workspace).replace('%', "%%"),
+        shell_escape(&pin.ssh_path()),
     );
     let host_alias = host_alias(name, workspace);
+    let options = pin
+        .ssh_options()
+        .into_iter()
+        .map(|(key, value)| format!("    {key} {value}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    // The alias does not name the gateway. A connection the user shares would
+    // also serve the sandbox of the same name on another gateway, unchecked.
     Ok(format!(
-        "Host {host_alias}\n    User sandbox\n    StrictHostKeyChecking no\n    UserKnownHostsFile /dev/null\n    GlobalKnownHostsFile /dev/null\n    LogLevel ERROR\n    ServerAliveInterval 15\n    ServerAliveCountMax 3\n    ProxyCommand {proxy_cmd}\n"
+        "Host {host_alias}\n    User sandbox\n{options}\n    ControlMaster no\n    ControlPath none\n    ControlPersist no\n    LogLevel ERROR\n    ServerAliveInterval 15\n    ServerAliveCountMax 3\n    ProxyCommand {proxy_cmd}\n"
     ))
 }
 
@@ -2497,6 +2603,41 @@ fn host_line_matches(line: &str, alias: &str) -> bool {
         .any(|token| token == alias)
 }
 
+/// What `render_ssh_config` wrote before host-key verification. With this
+/// entry, `ssh` accepts any host key.
+fn earlier_release_ssh_config(exe: &str, gateway: &str, name: &str, workspace: &str) -> String {
+    format!(
+        "Host {}\n    User sandbox\n    StrictHostKeyChecking no\n    UserKnownHostsFile /dev/null\n    GlobalKnownHostsFile /dev/null\n    LogLevel ERROR\n    ServerAliveInterval 15\n    ServerAliveCountMax 3\n    ProxyCommand {} ssh-proxy --gateway-name {} --name {} --workspace {}\n",
+        host_alias(name, workspace),
+        shell_escape(exe),
+        shell_escape(gateway),
+        shell_escape(name),
+        shell_escape(workspace),
+    )
+}
+
+/// Replaces each entry an earlier release wrote with the one this release
+/// writes for the same sandbox. Only an entry that is still that text, line
+/// for line, is replaced: one the user edited may hold options to keep. The
+/// executable is not compared, because each release named its own path.
+fn replace_earlier_release_entries(contents: &str) -> String {
+    let mut updated = contents.to_string();
+    let commands = contents
+        .lines()
+        .filter_map(|line| line.trim_start().strip_prefix("ProxyCommand "));
+    for command in commands {
+        // An entry that cannot be rendered stays, and is refused when it is used.
+        if let Ok(args) = shell_words::split(command)
+            && let [exe, _, _, gateway, _, name, _, workspace] = args.as_slice()
+            && let Ok(entry) = render_ssh_config(gateway, name, workspace)
+        {
+            let earlier = earlier_release_ssh_config(exe, gateway, name, workspace);
+            updated = updated.replace(&earlier, &entry);
+        }
+    }
+    updated
+}
+
 fn upsert_host_block(contents: &str, alias: &str, block: &str) -> String {
     let lines: Vec<&str> = contents.lines().collect();
     let start = lines.iter().position(|line| host_line_matches(line, alias));
@@ -2546,7 +2687,7 @@ pub fn install_ssh_config(gateway: &str, name: &str, workspace: &str) -> Result<
 
     let alias = host_alias(name, workspace);
     let contents = fs::read_to_string(&managed_config).unwrap_or_default();
-    let updated = upsert_host_block(&contents, &alias, &block);
+    let updated = replace_earlier_release_entries(&upsert_host_block(&contents, &alias, &block));
     fs::write(&managed_config, updated)
         .into_diagnostic()
         .wrap_err("failed to write OpenShell SSH config")?;
@@ -2614,7 +2755,7 @@ mod tests {
             environment.run(|| {
                 set_default_ssh_log_level("DEBUG");
                 let expected = override_level.unwrap_or("DEBUG");
-                let command = ssh_base_command("openshell ssh-tunnel");
+                let command = ssh_base_command(&pinned_proxy("known_hosts").0);
                 assert!(
                     command
                         .get_args()
@@ -2731,6 +2872,20 @@ mod tests {
     use crate::TEST_ENV_LOCK;
     use crate::test_utils::Environment;
 
+    const PUBLISHED_FINGERPRINT: &str = "SHA256:ZkAslGjFiUHdGf/WUL8rQvkib4PTvQatUV0OUQSncCA";
+
+    /// A proxy command for sandbox `demo`, and the file under `directory` in
+    /// which its host key is pinned.
+    fn pinned_proxy(directory: &str) -> (SandboxProxyCommand, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let known_hosts = dir.path().join(directory).join("openshell-demo.default");
+        let pin = KnownHostsPin::at(known_hosts.clone(), "demo", "default").unwrap();
+        let host_key =
+            HostKeyCheck::for_relay(PUBLISHED_FINGERPRINT.parse().unwrap(), pin).unwrap();
+        let proxy = SandboxProxyCommand::new("openshell ssh-proxy".to_string(), host_key);
+        (proxy, known_hosts)
+    }
+
     #[test]
     fn upsert_host_block_appends_when_missing() {
         let input = "Host existing\n  HostName example.com\n";
@@ -2772,6 +2927,13 @@ mod tests {
     fn sync_error_retry_filter_rejects_validation_failures() {
         let error = miette::miette!("sandbox source path '/etc/passwd' resolves outside /sandbox");
         assert!(!sync_error_is_retryable(&error));
+        let refusal = openshell_core::ssh_host_key::HostKeyError::Unpublished {
+            sandbox: "connection-test".to_string(),
+            workspace: "default".to_string(),
+        };
+        assert!(!sync_error_is_retryable(
+            &Err::<(), _>(refusal).into_diagnostic().unwrap_err()
+        ));
     }
 
     #[test]
@@ -2857,7 +3019,8 @@ mod tests {
                     let setup = phase == "setup";
                     async move {
                         if setup {
-                            return run_ssh_probe(ssh_base_command(""), "unused")
+                            let proxy = pinned_proxy("known_hosts").0;
+                            return run_ssh_probe(ssh_base_command(&proxy), "unused")
                                 .await
                                 .map(|_| ());
                         }
@@ -3094,17 +3257,119 @@ mod tests {
     }
 
     #[test]
-    fn render_ssh_config_includes_workspace_in_proxy_command() {
-        let config = render_ssh_config("my-gw", "demo", "beta").unwrap();
-        assert!(config.contains("--gateway-name my-gw"));
-        assert!(
-            config.contains("Host openshell-demo.beta"),
-            "host alias should be workspace-qualified: {config}"
+    fn install_ssh_config_replaces_the_entries_an_earlier_release_wrote() {
+        let home = tempfile::tempdir().unwrap();
+        let xdg = tempfile::tempdir().unwrap();
+        let earlier = |gateway, name| {
+            earlier_release_ssh_config("/opt/open shell/openshell", gateway, name, "beta")
+        };
+        // Not replaced: an entry with an option the user added, and one from
+        // before workspaces.
+        let kept = [
+            earlier("my-gw", "edited").replace("    LogLevel", "    ForwardAgent no\n    LogLevel"),
+            earlier("my-gw", "old")
+                .replace("openshell-old.beta", "openshell-old")
+                .replace(" --workspace beta", ""),
+        ]
+        .concat();
+        let added_after = "    LocalForward 3000 localhost:3000\n";
+
+        Environment::new()
+            .set("HOME", home.path())
+            .set("XDG_CONFIG_HOME", xdg.path())
+            .run(|| {
+                let managed = openshell_ssh_config_path().unwrap();
+                fs::create_dir_all(managed.parent().unwrap()).unwrap();
+                let written = [
+                    kept.as_str(),
+                    // Copied from a release, so the text compared against stays true to it.
+                    "Host openshell-one.beta\n    User sandbox\n    StrictHostKeyChecking no\n    UserKnownHostsFile /dev/null\n    GlobalKnownHostsFile /dev/null\n    LogLevel ERROR\n    ServerAliveInterval 15\n    ServerAliveCountMax 3\n    ProxyCommand '/opt/open shell/openshell' ssh-proxy --gateway-name 'my gw' --name one --workspace beta\n",
+                    added_after,
+                    &earlier("my-gw", "two"),
+                ];
+                fs::write(&managed, written.concat()).unwrap();
+
+                install_ssh_config("my-gw", "demo", "default").unwrap();
+
+                let installed = fs::read_to_string(&managed).unwrap();
+                let expected = [
+                    kept.as_str(),
+                    &render_ssh_config("my gw", "one", "beta").unwrap(),
+                    added_after,
+                    &render_ssh_config("my-gw", "two", "beta").unwrap(),
+                    "\n",
+                    &render_ssh_config("my-gw", "demo", "default").unwrap(),
+                ];
+                assert_eq!(installed, expected.concat());
+                install_ssh_config("my-gw", "demo", "default").unwrap();
+                assert_eq!(fs::read_to_string(&managed).unwrap(), installed);
+            });
+    }
+
+    #[test]
+    fn stale_ssh_config_warning_names_the_gateway_and_workspace_of_the_entry() {
+        assert_eq!(
+            stale_ssh_config_warning("my gw", "beta", "demo"),
+            "openshell: warning: this SSH config entry for sandbox 'demo' (workspace 'beta') predates host-key verification, so the SSH host key is NOT verified.\n\
+             Regenerate it: openshell -g 'my gw' --workspace beta sandbox connect demo --editor vscode\n\
+             Or replace the entry with the output of: openshell -g 'my gw' --workspace beta sandbox ssh-config demo"
         );
         assert!(
-            config.contains("--workspace beta"),
-            "ProxyCommand should include --workspace: {config}"
+            stale_ssh_config_warning("https://gw.example.com", "beta", "demo").contains(
+                "Regenerate it: openshell --gateway-endpoint 'https://gw.example.com' --workspace beta sandbox connect demo"
+            )
         );
+    }
+
+    /// `ssh` resolves the rendered block to the intended options, also when
+    /// the pin path needs quoting and a later block enables connection sharing.
+    #[cfg(unix)]
+    #[test]
+    fn rendered_ssh_config_makes_ssh_trust_only_the_pin() {
+        let home = tempfile::tempdir().unwrap();
+        crate::test_utils::with_tmp_xdg(&home.path().join("o'brien config home"), |config_home| {
+            let known_hosts = config_home
+                .join("openshell/known_hosts/my-gw/openshell-demo.beta")
+                .display()
+                .to_string();
+            let config = config_home.join("rendered_ssh_config");
+            fs::create_dir_all(config_home).unwrap();
+            let user_sharing = format!(
+                "Host *\n    ControlMaster auto\n    ControlPath \"{}/mux-%C\"\n    ControlPersist yes\n",
+                config_home.display()
+            );
+            fs::write(
+                &config,
+                render_ssh_config("my-gw", "demo", "beta").unwrap() + &user_sharing,
+            )
+            .unwrap();
+
+            let output = Command::new("ssh")
+                .arg("-F")
+                .arg(&config)
+                .args(["-G", "openshell-demo.beta"])
+                .output()
+                .unwrap();
+            let effective = String::from_utf8(output.stdout).unwrap();
+
+            assert_only_the_pin_is_trusted(
+                &effective,
+                Path::new(&known_hosts),
+                "openshell-demo.beta",
+            );
+            assert_connection_sharing_disabled(&effective);
+            let proxy_command = effective
+                .lines()
+                .find_map(|line| line.strip_prefix("proxycommand "))
+                .unwrap();
+            assert!(
+                proxy_command.ends_with(&format!(
+                    " ssh-proxy --gateway-name my-gw --name demo --workspace beta --known-hosts {}",
+                    shell_escape(&known_hosts)
+                )),
+                "{proxy_command}"
+            );
+        });
     }
 
     #[test]
@@ -3201,8 +3466,10 @@ mod tests {
         fs::write(
             &config,
             format!(
-                "Host sandbox\n  ControlMaster auto\n  ControlPath {}/mux-%C\n  ControlPersist yes\n  ForkAfterAuthentication yes\n",
-                dir.path().display()
+                "Host sandbox\n  ControlMaster auto\n  ControlPath {dir}/mux-%C\n  ControlPersist yes\n  ForkAfterAuthentication yes\n  \
+                 StrictHostKeyChecking no\n  UserKnownHostsFile /dev/null\n  GlobalKnownHostsFile {dir}/global_known_hosts\n  \
+                 HostKeyAlias another-host\n  HostKeyAlgorithms rsa-sha2-512\n  VerifyHostKeyDNS yes\n  UpdateHostKeys yes\n",
+                dir = dir.path().display()
             ),
         )
         .unwrap();
@@ -3235,21 +3502,41 @@ mod tests {
     }
 
     #[cfg(unix)]
+    fn assert_only_the_pin_is_trusted(effective: &str, known_hosts: &Path, alias: &str) {
+        for option in [
+            "stricthostkeychecking true",
+            &format!("userknownhostsfile {}", known_hosts.display()),
+            "globalknownhostsfile /dev/null",
+            &format!("hostkeyalias {alias}"),
+            "hostkeyalgorithms ssh-ed25519",
+            "verifyhostkeydns false",
+            "updatehostkeys false",
+        ] {
+            assert!(effective.lines().any(|line| line == option), "{option}");
+        }
+    }
+
+    #[cfg(unix)]
     #[test]
-    fn ssh_base_command_overrides_user_connection_sharing() {
-        let effective =
-            effective_ssh_config(&ssh_base_command("openshell ssh-proxy"), &["-N", "sandbox"]);
-        assert_connection_sharing_disabled(&effective);
+    fn ssh_base_command_overrides_user_connection_sharing_and_host_key_trust() {
+        for directory in [
+            "known_hosts",
+            "known hosts",
+            "o'brien known=hosts",
+            "100% #1",
+        ] {
+            let (proxy, known_hosts) = pinned_proxy(directory);
+            let effective = effective_ssh_config(&ssh_base_command(&proxy), &["-N", "sandbox"]);
+            assert_connection_sharing_disabled(&effective);
+            assert_only_the_pin_is_trusted(&effective, &known_hosts, "openshell-demo.default");
+        }
     }
 
     #[cfg(unix)]
     #[test]
     fn forward_ssh_command_overrides_user_multiplexing_and_forking() {
-        let forward = ssh_forward_command(
-            "openshell ssh-proxy --sandbox demo",
-            "sandbox-id",
-            &ForwardSpec::new(18080),
-        );
+        let (proxy, _) = pinned_proxy("known_hosts");
+        let forward = ssh_forward_command(&proxy, "sandbox-id", &ForwardSpec::new(18080));
         let effective = effective_ssh_config(&forward, &[]);
         assert_connection_sharing_disabled(&effective);
         assert!(
@@ -3262,7 +3549,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn upload_ssh_command_overrides_user_multiplexing_and_forking() {
-        let upload = ssh_upload_command("openshell ssh-proxy --sandbox demo");
+        let upload = ssh_upload_command(&pinned_proxy("known_hosts").0);
         let effective = effective_ssh_config(&upload, &[]);
         assert_connection_sharing_disabled(&effective);
         for expected in [

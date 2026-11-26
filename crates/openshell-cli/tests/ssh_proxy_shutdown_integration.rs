@@ -203,6 +203,8 @@ async fn proxy_exits_with_stdin_open(relay_status: Status, admission: Admission)
         ])
         .env("XDG_CONFIG_HOME", config.path())
         .env("OPENSHELL_TELEMETRY_ENABLED", "false")
+        // Started without `--known-hosts`, the proxy verifies no host key.
+        .env("OPENSHELL_SSH_REQUIRE_HOST_KEY", "0")
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -252,6 +254,8 @@ async fn dropping_handoff_cancels_a_stalled_relay_open() {
     )
     .await;
     let (owner, peer) = tokio::io::duplex(8);
+    let config = tempfile::tempdir().unwrap();
+    let known_hosts = config.path().join("known_hosts");
     let proxy = tokio::spawn(async move {
         let grant = openshell_core::ssh_handoff::RelayGrant {
             authorization: Some(openshell_core::ssh_handoff::RelayAuthorization::Session(
@@ -267,6 +271,10 @@ async fn dropping_handoff_cancels_a_stalled_relay_open() {
             endpoint: format!("http://{address}"),
             gateway_name: "test".into(),
             replica: None,
+            host_key: Some(openshell_core::ssh_handoff::HostKeyHandoff {
+                expectation: "SHA256:ZkAslGjFiUHdGf/WUL8rQvkib4PTvQatUV0OUQSncCA".into(),
+                known_hosts: known_hosts.display().to_string(),
+            }),
         };
         openshell_cli::ssh::relay_prepared_ssh(
             grant,
@@ -350,6 +358,8 @@ fn sandbox_cli(config: &tempfile::TempDir, address: SocketAddr) -> tokio::proces
     .env("PATH", config.path())
     .env("XDG_CONFIG_HOME", config.path())
     .env("OPENSHELL_TELEMETRY_ENABLED", "false")
+    // The gateway of these tests publishes no host key.
+    .env("OPENSHELL_SSH_REQUIRE_HOST_KEY", "0")
     .kill_on_drop(true);
     cli
 }

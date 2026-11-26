@@ -716,6 +716,12 @@ enum Commands {
         /// Sandbox to connect to.
         #[arg(long, alias = "sandbox")]
         name: String,
+
+        /// Known-hosts file of a saved SSH profile, in which the verified host
+        /// key is pinned for `ssh`. Without it the host key is not verified,
+        /// and the connection is refused by default.
+        #[arg(long, conflicts_with = "handoff")]
+        known_hosts: Option<PathBuf>,
     },
 }
 
@@ -4409,6 +4415,7 @@ async fn run_async() -> Result<()> {
             gateway_name,
             name,
             handoff,
+            known_hosts,
         }) => {
             if let Some(handle) = handoff {
                 let (grant, peer) = openshell_core::ssh_handoff::receive(&handle).await?;
@@ -4428,7 +4435,15 @@ async fn run_async() -> Result<()> {
                 let ctx = resolve_gateway(&profile, &endpoint, allow_endpoint_override)?;
                 let mut tls = tls.with_gateway_name(&ctx.name);
                 apply_auth(&mut tls, &ctx.name)?;
-                run::sandbox_ssh_proxy_by_name(&ctx.endpoint, &name, &tls, &cli.workspace).await?;
+                run::sandbox_ssh_proxy_by_name(
+                    &ctx.endpoint,
+                    &ctx.name,
+                    &name,
+                    &tls,
+                    &cli.workspace,
+                    known_hosts,
+                )
+                .await?;
             }
         }
 
@@ -5467,17 +5482,23 @@ mod tests {
                 "my-box",
                 "--workspace",
                 "team-a",
+                "--known-hosts",
+                "/home/u/.config/openshell/known_hosts/my-gateway/openshell-my-box.team-a",
             ])
             .unwrap();
             assert_eq!(cli.workspace, "team-a");
             let Some(Commands::SshProxy {
-                gateway_name, name, ..
+                gateway_name,
+                name,
+                known_hosts,
+                ..
             }) = cli.command
             else {
                 panic!("expected ssh-proxy")
             };
             assert_eq!(gateway_name.as_deref(), Some("my-gateway"));
             assert_eq!(name, "my-box");
+            assert!(known_hosts.is_some());
         }
     }
 

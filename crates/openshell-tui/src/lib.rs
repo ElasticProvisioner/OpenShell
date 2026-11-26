@@ -1025,7 +1025,7 @@ async fn run_sandbox_ssh(
     {
         Ok(Ok(proxy)) => proxy,
         Ok(Err(error)) => {
-            app.status_text = format!("SSH session failed: {error}");
+            app.status_text = format!("SSH session failed: {}", first_line(&error));
             return Ok(());
         }
         Err(_) => {
@@ -1045,6 +1045,7 @@ async fn run_sandbox_ssh(
     if !args.is_empty() {
         command.arg(build_exec_command(args));
     }
+    let unverified_warning = proxy.command().unverified_warning();
     let result = proxy
         .run(async {
             // Cancel log stream and pause event handler before suspending.
@@ -1063,6 +1064,9 @@ async fn run_sandbox_ssh(
             .into_diagnostic()?;
             disable_raw_mode().into_diagnostic()?;
 
+            if let Some(warning) = &unverified_warning {
+                eprintln!("{warning}");
+            }
             tokio::process::Command::from(command)
                 .kill_on_drop(true)
                 .status()
@@ -1076,6 +1080,11 @@ async fn run_sandbox_ssh(
         Ok(_) => format!("Command finished on {}", target.name),
         Err(error) => format!("failed to launch ssh: {error}"),
     };
+    // `ssh` takes the terminal right after the warning above, so repeat it,
+    // first because the status line is cut at the terminal width.
+    if unverified_warning.is_some() {
+        app.status_text.insert_str(0, "SSH host key NOT verified; ");
+    }
 
     // Resume and draw the TUI before accepting new terminal input.
     enable_raw_mode().into_diagnostic()?;
@@ -1098,6 +1107,13 @@ async fn run_sandbox_ssh(
 
 // SSH utility functions are shared via openshell_core::forward.
 use openshell_core::forward::{sandbox_ssh_args, shell_escape};
+
+/// The status line shows one row, so it carries the first line of an error.
+/// `openshell sandbox connect` prints the rest of a host key refusal.
+fn first_line(error: &miette::Report) -> String {
+    let error = error.to_string();
+    error.lines().next().unwrap_or_default().to_string()
+}
 
 fn build_exec_command(command: &[String]) -> String {
     command
@@ -1500,7 +1516,10 @@ async fn start_port_forwards(
         {
             Ok(Ok(proxy)) => proxy,
             Ok(Err(error)) => {
-                warnings.push(format!("SSH session failed for forwards: {error}"));
+                warnings.push(format!(
+                    "SSH session failed for forwards: {}",
+                    first_line(&error)
+                ));
                 break;
             }
             Err(_) => {
@@ -1508,6 +1527,11 @@ async fn start_port_forwards(
                 break;
             }
         };
+        if let Some(warning) = proxy.command().unverified_warning()
+            && !warnings.contains(&warning)
+        {
+            warnings.push(warning);
+        }
         let ssh_forward_arg = spec.ssh_forward_arg();
         let port_val = spec.port;
         let bind_addr = spec.bind_addr.clone();
