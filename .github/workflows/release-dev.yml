@@ -256,6 +256,27 @@ jobs:
             tasks/scripts/verify-image-sbom.sh "quay.io/ai-openshell/${component}:dev" --require-cargo
           done
 
+  # Floating dev references keep the Code Scanning categories stable, so each
+  # scan replaces the previous one and fixed findings close.
+  trivy:
+    name: Scan Dev Images and Charts
+    needs: [tag-ghcr-dev, release-helm]
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
+    uses: ./.github/workflows/trivy-scan.yml
+    with:
+      images: |
+        quay.io/ai-openshell/gateway:dev
+        quay.io/ai-openshell/sandbox:dev
+        quay.io/ai-openshell/supervisor:dev
+      charts: |
+        oci://quay.io/ai-openshell/charts/openshell:0.0.0-dev
+        oci://quay.io/ai-openshell/charts/openshell-workspace:0.0.0-dev
+    secrets:
+      CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
   build-deb:
     name: Build Debian Packages
     needs: [compute-versions, build-binaries-linux, build-binaries-macos, build-vm-driver-linux, build-vm-driver-macos]

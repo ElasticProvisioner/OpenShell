@@ -11,7 +11,7 @@ on:
         required: true
         type: string
       fail-on-static-findings:
-        description: Fail when CodeQL, Trivy, or Zizmor reports HIGH/CRITICAL findings
+        description: Fail when CodeQL or Zizmor reports HIGH/CRITICAL findings
         default: true
         type: boolean
       images:
@@ -29,7 +29,7 @@ on:
         required: true
         type: string
       fail-on-static-findings:
-        description: Fail when CodeQL, Trivy, or Zizmor reports HIGH/CRITICAL findings
+        description: Fail when CodeQL or Zizmor reports HIGH/CRITICAL findings
         default: true
         type: boolean
       images:
@@ -68,9 +68,9 @@ jobs:
       security-events: write
     with:
       candidate_ref: ${{ inputs.candidate_ref }}
-      fail-on-findings: ${{ inputs.fail-on-static-findings }}
-      severity: HIGH,CRITICAL
       ignore-unfixed: false
+      # Release Dev owns the Trivy alerts on main.
+      upload-sarif: false
       images: ${{ inputs.images }}
       charts: ${{ inputs.charts }}
     secrets:
