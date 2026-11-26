@@ -534,6 +534,15 @@ the release. Look for failed installs, unexpected values, missing namespace, wro
 image tag, TLS settings that do not match the registered endpoint, and
 scheduling failures.
 
+If the opt-in storage preflight stops a fresh StatefulSet install, run
+`kubectl get storageclass` and set `server.dataStorageClass` to an existing
+class for dynamic provisioning. The Helm identity needs cluster-scoped
+`list storageclasses` permission for the check. If the API denies the lookup,
+set an explicit gateway class or disable the check. Set
+`storageClass.preflight.enabled=false` when reinstalling with retained gateway
+PVCs. Check `server.workspaceStorageClass` separately when the cluster has no
+default class.
+
 If Kubernetes rejects `app.kubernetes.io/version` on a resource or certgen hook,
 inspect the rendered label and chart app version. Charts normalize SemVer build
 metadata for labels (`0.1.9+build.1` becomes `0.1.9_build.1`) without changing
